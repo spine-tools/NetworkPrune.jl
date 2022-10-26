@@ -12,7 +12,7 @@ The goal of this function is to reduce the dimensionality of the network model b
 ### Usage
 To run the function on a Spine database located at `db_url` and write results on `prunned_db_url`, simply call `prune_network(db_url, prunned_db_url)`.
 
-To run the example in the respository, one can run the following code:
+For example:
 
 ```julia
 using NetworkPrune
@@ -26,7 +26,7 @@ Requirements for the input Spine database
  - The network is defined by nodes and connections. It is assumed each connection has a single `connection__from_node` and a single `connection__to_node relationship`
  - To be included in the network, each node must be related to a single `commodity` with `commodity_physics(commodity=c) in(:commodity_physics_ptdf, :commodity_physics_lodf)`
  - To define the minimum voltage level, a node group can be created and the parameter `minimum_voltage` specified which will set the minimum voltage level for all member nodes. 
- - A sample database can be found in the repository
+ - A sample database can be found in the `examples` folder.
 
 ## `psse_to_spine`
 This function takes as input a PSSE raw file and uses Powersystems.jl to parse it. It then creates an equivalent minimal SpineOpt system which can be used directly with network_prune.jl as described above. The function automatically creates node groups based on the zones and areas in the PSSE raw file. A minimum voltage level of 110 is currently pre-specified. This can easily be changed by updated the minimum_voltage parameter in the resulting Spine database that is created.
@@ -34,12 +34,12 @@ This function takes as input a PSSE raw file and uses Powersystems.jl to parse i
 ### Usage
 To convert the PSSE raw file at psse_path to a Spine Database at db_url one simply calls `psse_to_spine(psse_path, db_url)`
 
-To run the example in the respository, one can run the following code:
+For example:
 
 ```julia
 using NetworkPrune
 
-db_url = "sqlite:///powersystems_test.sqlite"
+db_url = "sqlite:///powersystem.sqlite"
 psse_path = "WP2019.raw"
 psse_to_spine(psse_path, db_url)
 ```
