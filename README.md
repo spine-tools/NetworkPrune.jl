@@ -4,7 +4,7 @@ Production cost modelling and load flow analysis are common and often separate t
 
 This packages provides two main functions:
  - `prune_network`, which reduces a network model by voltage level.
- - `psse_to_spine`, which parses PSSE raw files using Powersystems.jl and creates a minimal SpineOpt model.
+ - `psse_to_spine`, which parses PSSE raw files using PowerSystems.jl and creates a minimal SpineOpt model.
   
 ## `prune_network`
 The goal of this function is to reduce the dimensionality of the network model by removing lower voltage nodes and connections that are not necessary for production cost and energy system modelling studies. The algorithm calculates the power transfer distribution factors (PTDFs) of the network and uses tree traversal to find the nearest higher-voltage level node above the minimum voltage level specified. When only a single higher-level node is identified, generation and loads are simply moved to the nearest higher level node. When multiple paths exist to a higher voltage level, the network PTDFs are used to distribute the load and generation in the correct proportion. This approach will yield an identical DC power flow solution to the original network but will contain fewer nodes and connections - the trade-off is that the flows on the lower level network are unknown.
@@ -32,7 +32,7 @@ Requirements for the input Spine database
 This function takes as input a PSSE raw file and uses Powersystems.jl to parse it. It then creates an equivalent minimal SpineOpt system which can be used directly with network_prune.jl as described above. The function automatically creates node groups based on the zones and areas in the PSSE raw file. A minimum voltage level of 110 is currently pre-specified. This can easily be changed by updated the minimum_voltage parameter in the resulting Spine database that is created.
 
 ### Usage
-To convert the PSSE raw file at psse_path to a Spine Database at db_url one simply calls `psse_to_spine(psse_path, db_url)`
+To convert the PSSE raw file at `psse_path` to a Spine Database at `db_url` one simply calls `psse_to_spine(psse_path, db_url)`
 
 For example:
 
