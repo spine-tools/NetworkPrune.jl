@@ -1,0 +1,13 @@
+name = "NetworkPrune"
+uuid = "c072102b-c7f1-477f-983f-a572c7a1b9d5"
+authors = ["Manuel <chacarero@gmail.com> and contributors"]
+version = "0.1.0"
+
+[compat]
+julia = "1"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
