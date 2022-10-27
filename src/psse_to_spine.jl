@@ -19,8 +19,8 @@
 """
     psse_to_spine(psse_path, db_url)
 
-Parse the psse raw file (`psse_path`) using PowerModels.jl and convert it
-to a Spine model at `db_url` using `nodes`, `units` and `conenctions`
+Parse the psse raw file (`psse_path`) using PowerModels.jl
+and create a SpineOpt model at `db_url` using `nodes`, `units` and `connections`.
 """
 
 struct FilteredIO <: IO
@@ -30,38 +30,25 @@ end
 
 Base.readlines(io::FilteredIO) = filter!(io.flt, readlines(io.inner))
 
-function psse_to_spine(psse_path, db_url::String)
+function psse_to_spine(psse_path, db_url::String; skip=())
     pm_data = open(psse_path) do io
         filtered_io = FilteredIO(io, line -> !startswith(line, "@!") && !isempty(strip(line)))
         PowerModels.parse_psse(filtered_io)
     end
-    write_powersystem(pm_data, db_url)
+    psse_to_spine(pm_data, db_url; skip=skip)
 end
-
-
-function new_object_parameters()    
-    object_parameters = []     
-
-    push!(object_parameters,("node", "minimum_voltage"))
-    push!(object_parameters,("node", "voltage"))   
-
-    return  object_parameters            
-end
-
-
-"""
-    write_powersystem!(ps_system, db_url)
-
-Given the PowerModels.jl system dict `ps_system`, create a Spine Model db at `db_url`
-"""
-
-function write_powersystem(ps_system::Dict, db_url::String)
+function psse_to_spine(ps_system::Dict, db_url::String; skip=())
     
     objects = []
     object_groups = []
     relationships = []
     object_parameter_values = []
     relationship_parameter_values = []
+
+    object_parameters = [
+        ("node", "minimum_voltage"),
+        ("node", "voltage")
+    ]
 
     commodity_name = "elec"
 
@@ -73,10 +60,10 @@ function write_powersystem(ps_system::Dict, db_url::String)
     push!(objects, ["commodity", commodity_name])
 
     push!(object_parameter_values, ("commodity", commodity_name, "commodity_lodf_tolerance", 0.1))
-    push!(object_parameter_values,("commodity", commodity_name, "commodity_physics", "commodity_physics_ptdf"))
-    push!(object_parameter_values,("commodity", commodity_name, "commodity_ptdf_flow_tolerance",0.1))
-    push!(object_parameter_values,("commodity", commodity_name, "commodity_ptdf_threshold",0.0001))
-    push!(object_parameter_values,("commodity", commodity_name, "commodity_slack_penalty", 1000))
+    push!(object_parameter_values, ("commodity", commodity_name, "commodity_physics", "commodity_physics_ptdf"))
+    push!(object_parameter_values, ("commodity", commodity_name, "commodity_ptdf_flow_tolerance", 0.1))
+    push!(object_parameter_values, ("commodity", commodity_name, "commodity_ptdf_threshold", 0.0001))
+    push!(object_parameter_values, ("commodity", commodity_name, "commodity_slack_penalty", 1000))
 
     node_demand = Dict{Int64,Float64}()
     node_name = Dict{Int64,String}()
@@ -85,13 +72,12 @@ function write_powersystem(ps_system::Dict, db_url::String)
         data = b[2]
         i = data["bus_i"]
         node_demand[i] = 0
-        name = string(i, "_" , data["name"][1:3], "_", Int(round(data["base_kv"], digits=0)))
-        node_name[i] = name
+        voltage_level = Int(round(data["base_kv"], digits=0))
+        node_name[i] = name = join([lpad(voltage_level, 3, "0"), data["name"][1:3], i], "_")
         n = ("node", name)
         push!(objects, n)
         push!(object_parameter_values, ("node", name, "voltage", data["base_kv"]))
 
-        #if data["bus_type"] == BusTypes.REF
         if data["bus_type"] == 3
             push!(object_parameter_values, ("node", name, "node_opf_type", "node_opf_type_reference"))
         end
@@ -103,13 +89,13 @@ function write_powersystem(ps_system::Dict, db_url::String)
             push!(objects, ("node", area_name))
             push!(object_parameter_values, ("node", area_name, "minimum_voltage", 110.0))
         end        
-        push!(object_groups,["node", area_name, name])
+        push!(object_groups, ["node", area_name, name])
 
         if !(zone_name in zones)
             push!(zones, zone_name)
             push!(objects, ("node", zone_name))
         end        
-        push!(object_groups,["node", zone_name, name])
+        push!(object_groups, ["node", zone_name, name])
 
         obj_list = []
         push!(obj_list, name)
@@ -117,7 +103,7 @@ function write_powersystem(ps_system::Dict, db_url::String)
         push!(relationships,("node__commodity", obj_list))
     end
 
-    for b in ps_system["branch"]
+    for b in ("branch" in skip ? () : ps_system["branch"])
         data = b[2]
         if data["br_status"] in (0, 1)
             from_bus_name = node_name[data["f_bus"]]
@@ -131,7 +117,6 @@ function write_powersystem(ps_system::Dict, db_url::String)
             push!(object_parameter_values, ("connection", name, "connection_reactance", data["br_x"]))
             push!(object_parameter_values, ("connection", name, "connection_monitored", 1))
             push!(object_parameter_values, ("connection", name, "connection_contingency", 1))
-            # push!(object_parameter_values, ("connection", name, "connection_length", data["br_r"]))
             push!(object_parameter_values, ("connection", name, "connection_availability_factor", 1.0))
             obj_list = []
             push!(obj_list, name)
@@ -144,20 +129,26 @@ function write_powersystem(ps_system::Dict, db_url::String)
                 rate_b = rate_a
             end
 
-            push!(relationship_parameter_values,("connection__to_node", obj_list, "connection_capacity", rate_a))
-            push!(relationship_parameter_values,("connection__to_node", obj_list, "connection_emergency_capacity", rate_b))
+            push!(relationship_parameter_values, ("connection__to_node", obj_list, "connection_capacity", rate_a))
+            push!(
+                relationship_parameter_values,
+                ("connection__to_node", obj_list, "connection_emergency_capacity", rate_b)
+            )
 
-            obj_list=[]
-            push!(obj_list,name)
-            push!(obj_list,from_bus_name)
-            push!(relationships,("connection__from_node",obj_list))
-            push!(relationship_parameter_values,("connection__from_node", obj_list, "connection_capacity", rate_a))
-            push!(relationship_parameter_values,("connection__from_node", obj_list, "connection_emergency_capacity", rate_b))
+            obj_list = []
+            push!(obj_list, name)
+            push!(obj_list, from_bus_name)
+            push!(relationships, ("connection__from_node", obj_list))
+            push!(relationship_parameter_values, ("connection__from_node", obj_list, "connection_capacity", rate_a))
+            push!(
+                relationship_parameter_values,
+                ("connection__from_node", obj_list, "connection_emergency_capacity", rate_b)
+            )
         end
     end
 
-    for dc in ps_system["dcline"]
-        data=dc[2]
+    for dc in ("dcline" in skip ? () : ps_system["dcline"])
+        data = dc[2]
         from_bus_name = node_name[data["source_id"][2]]
         to_bus_name = node_name[data["source_id"][3]]
         ckt = 1
@@ -171,26 +162,25 @@ function write_powersystem(ps_system::Dict, db_url::String)
         push!(object_parameter_values, ("connection", name, "connection_reactance", 0.0001))
         push!(object_parameter_values, ("connection", name, "connection_monitored", 0))
         push!(object_parameter_values, ("connection", name, "connection_contingency", 0))
-        #push!(object_parameter_values, ("connection", name, "connection_length", data["br_r"]))
         push!(object_parameter_values, ("connection", name, "connection_availability_factor", 1.0))
 
         obj_list = []
         push!(obj_list, name)
         push!(obj_list, to_bus_name)
         push!(relationships,("connection__to_node",obj_list))
-        push!(relationship_parameter_values,("connection__to_node", obj_list, "connection_capacity", pmaxt))
-        push!(relationship_parameter_values,("connection__to_node", obj_list, "connection_emergency_capacity", pmaxt))
+        push!(relationship_parameter_values, ("connection__to_node", obj_list, "connection_capacity", pmaxt))
+        push!(relationship_parameter_values, ("connection__to_node", obj_list, "connection_emergency_capacity", pmaxt))
 
         obj_list = []
         push!(obj_list, name)
         push!(obj_list, from_bus_name)
         push!(relationships,("connection__from_node",obj_list))
-        push!(relationship_parameter_values,("connection__from_node", obj_list, "connection_capacity", pmaxf))
-        push!(relationship_parameter_values,("connection__from_node", obj_list, "connection_emergency_capacity", pmaxf))
+        push!(relationship_parameter_values, ("connection__from_node", obj_list, "connection_capacity", pmaxf))
+        push!(relationship_parameter_values, ("connection__from_node", obj_list, "connection_emergency_capacity", pmaxf))
     end
 
     gen_ids = []
-    for g in ps_system["gen"]
+    for g in ("gen" in skip ? () : ps_system["gen"])
         data = g[2]
         bus_name = node_name[data["gen_bus"]]
         name = string(ps_system["bus"][string(data["gen_bus"])]["name"][1:3], "_", rstrip(data["source_id"][3]))
@@ -216,9 +206,12 @@ function write_powersystem(ps_system::Dict, db_url::String)
         push!(obj_list, bus_name)
         push!(relationships, ("unit__to_node", obj_list))
 
-        push!(relationship_parameter_values, ("unit__to_node", obj_list, "unit_capacity", round(data["pmax"]*baseMVA, digits=2)))
+        push!(
+            relationship_parameter_values,
+            ("unit__to_node", obj_list, "unit_capacity", round(data["pmax"] * baseMVA, digits=2))
+        )
         pmin = round(data["pmin"] / data["pmax"], digits=4)
-        if isa(pmin, Number)
+        if pmin isa Number
             push!(relationship_parameter_values, ("unit__to_node", obj_list, "minimum_operating_point", pmin))
         end
     end
@@ -250,7 +243,7 @@ function write_powersystem(ps_system::Dict, db_url::String)
         comment;
         objects=objects,
         object_groups=object_groups,
-        object_parameters=new_object_parameters(),
+        object_parameters=object_parameters,
         relationships=relationships,
         object_parameter_values=object_parameter_values,
         relationship_parameter_values=relationship_parameter_values
