@@ -47,6 +47,7 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=())
 
     object_parameters = [
         ("node", "minimum_voltage"),
+        ("node", "psse_bus_name"),
         ("node", "voltage")
     ]
 
@@ -74,9 +75,9 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=())
         node_demand[i] = 0
         voltage_level = Int(round(data["base_kv"], digits=0))
         node_name[i] = name = join([lpad(voltage_level, 3, "0"), data["name"][1:3], i], "_")
-        n = ("node", name)
-        push!(objects, n)
+        push!(objects, ("node", name))
         push!(object_parameter_values, ("node", name, "voltage", data["base_kv"]))
+        push!(object_parameter_values, ("node", name, "psse_bus_name", strip(data["name"])))        
 
         if data["bus_type"] == 3
             push!(object_parameter_values, ("node", name, "node_opf_type", "node_opf_type_reference"))
@@ -233,7 +234,10 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=())
     end
     @info "writing PSSE data to $(db_url)"
 
-    import_data(db_url, SpineOpt.template(), "Load SpineOpt template")
+    added, err_log = import_data(db_url, SpineOpt.template(), "Load SpineOpt template")
+    if !isempty(err_log)
+        @error join(err_log, "\n")
+    end
 
     @info "importing data to $(db_url)"
 
@@ -247,7 +251,10 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=())
         relationships=relationships,
         object_parameter_values=object_parameter_values,
         relationship_parameter_values=relationship_parameter_values
-    )        
+    )
+    if !isempty(err_log)
+        @error join(err_log, "\n")
+    end
 
     @info "data imported to $(db_url)"
 
