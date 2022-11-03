@@ -74,7 +74,7 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=())
         i = data["bus_i"]
         node_demand[i] = 0
         voltage_level = Int(round(data["base_kv"], digits=0))
-        node_name[i] = name = join([lpad(voltage_level, 3, "0"), data["name"][1:3], i], "_")
+        node_name[i] = name = join([i, data["name"][1:3], voltage_level], "_")
         push!(objects, ("node", name))
         push!(object_parameter_values, ("node", name, "voltage", data["base_kv"]))
         push!(object_parameter_values, ("node", name, "psse_bus_name", strip(data["name"])))        
