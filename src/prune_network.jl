@@ -44,14 +44,14 @@ function prune_network(db_url::String, prunned_db_url::String)
                 print(island_node)
             end
 
-            net_inj_nodes=get_net_inj_nodes() # returns list of nodes that have demand and/or generation
+            net_inj_nodes = get_net_inj_nodes()  # returns list of nodes that have demand and/or generation
 
             @info "calculating ptdfs"
             ptdf_conn_n = calculate_ptdfs()
 
             if commodity_physics(commodity = c) == :commodity_physics_lodf
                 con__mon = Tuple{Object,Object}[]
-                @info "calculating lodfs"  lodf_con_mon = calculate_lodfs(ptdf_conn_n, con__mon)
+                @info "calculating lodfs" lodf_con_mon = calculate_lodfs(ptdf_conn_n, con__mon)
             end
         end
     end
@@ -63,12 +63,12 @@ function prune_network(db_url::String, prunned_db_url::String)
     node__new_nodes = Dict{Object,Array}()
     min_v = 0
     for c in commodity()
-        if commodity_physics(commodity=c) in(:commodity_physics_lodf, :commodity_physics_ptdf)
+        if commodity_physics(commodity=c) in (:commodity_physics_lodf, :commodity_physics_ptdf)
             for n in node__commodity(commodity=c)
                 push!(comm_nodes, n)
                 if !isempty(unit__to_node(node=n)) || demand(node=n) > 0
                     for ng in groups(n)
-                        if ! (minimum_voltage(node=ng) == nothing)
+                        if minimum_voltage(node=ng) != nothing
                             min_v = minimum_voltage(node=ng)
                             break
                         end
@@ -81,19 +81,19 @@ function prune_network(db_url::String, prunned_db_url::String)
         end
     end
 
-    #@info "Writing ptdf diagnostic file"
-    #write_ptdfs(ptdf_conn_n, comm_nodes)
+    # @info "Writing ptdf diagnostic file"
+    # write_ptdfs(ptdf_conn_n, comm_nodes)
 
     @info "Traversing nodes"
     for n in inj_nodes
-        node__new_nodes[n]=[]
+        node__new_nodes[n] = []
     end
 
     for n in inj_nodes
         for n2 in comm_nodes
             traversed[n2] = false
         end
-        min_v=0
+        min_v = 0
         for ng in groups(n)
             if ! (minimum_voltage(node=ng) == nothing)
                 min_v = minimum_voltage(node=ng)
@@ -237,7 +237,7 @@ function prune_network(db_url::String, prunned_db_url::String)
     run_request(prunned_db_url, "import_data", (all_data, ""))
     to_prune_object_ids = [
         x["id"]
-        for x in run_request(db_url, "query", ("ext_object_sq",))["ext_object_sq"]
+        for x in run_request(prunned_db_url, "query", ("ext_object_sq",))["ext_object_sq"]
         if (Symbol(x["class_name"]), Symbol(x["name"])) in to_prune_object_keys
     ]
     run_request(prunned_db_url, "call_method", ("cascade_remove_items",), Dict(:object => to_prune_object_ids))
