@@ -31,14 +31,14 @@ Base.readlines(io::FilteredIO) = filter!(io.flt, readlines(io.inner))
 Parse the psse raw file (`psse_path`) using PowerModels.jl
 and create a SpineOpt model at `db_url` using `nodes`, `units` and `connections`.
 """
-function psse_to_spine(psse_path, db_url::String; skip=(), bus_codes=Dict())
+function psse_to_spine(psse_path, db_url::String; skip=(), bus_codes=Dict(), alternative="Base")
     pm_data = open(psse_path) do io
         filtered_io = FilteredIO(io, line -> !startswith(line, "@!") && !isempty(strip(line)))
         PowerModels.parse_psse(filtered_io)
     end
-    psse_to_spine(pm_data, db_url; skip=skip, bus_codes=bus_codes)
+    psse_to_spine(pm_data, db_url; skip=skip, bus_codes=bus_codes, alternative=alternative)
 end
-function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict())
+function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(), alternative="Base")
 
     objects = []
     object_groups = []
@@ -251,6 +251,9 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
 
     @info "importing data to $(db_url)"
 
+    object_parameter_values = [(opv..., alternative) for opv in object_parameter_values]
+    relationship_parameter_values = [(opv..., alternative) for opv in relationship_parameter_values]
+
     comment = "Import powersystems to Spine"
     added, err_log = import_data(
         db_url,
@@ -260,7 +263,8 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
         object_parameters=object_parameters,
         relationships=relationships,
         object_parameter_values=object_parameter_values,
-        relationship_parameter_values=relationship_parameter_values
+        relationship_parameter_values=relationship_parameter_values,
+        alternatives=[alternative]
     )
     if !isempty(err_log)
         @error join(err_log, "\n")

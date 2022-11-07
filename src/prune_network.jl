@@ -18,7 +18,7 @@
 #############################################################################
 
 
-function prune_network(db_url::String, prunned_db_url::String)
+function prune_network(db_url::String, prunned_db_url::String; alternative="Base")
     con__mon = []  # set of monitored and contingent line tuples that must be considered as defined by the
                    # connection_monitored and connection_contingency parameters
     monitored_lines = []
@@ -248,6 +248,9 @@ function prune_network(db_url::String, prunned_db_url::String)
     comment = "Network pruning: low voltage nodes removed"
     run_request(prunned_db_url, "call_method", ("commit_session", comment))
 
+    object_parameter_values = [(opv..., alternative) for opv in object_parameter_values]
+    relationship_parameter_values = [(opv..., alternative) for opv in relationship_parameter_values]
+
     added, err_log = import_data(
         prunned_db_url,
         "";
@@ -255,6 +258,7 @@ function prune_network(db_url::String, prunned_db_url::String)
         relationships=relationships,
         object_parameter_values=object_parameter_values,
         relationship_parameter_values=relationship_parameter_values,
+        alternatives=[alternative]
     )
     @info "added $(added) items"
     for err in err_log
