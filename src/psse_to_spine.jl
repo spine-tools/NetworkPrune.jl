@@ -76,7 +76,7 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
         i = data["bus_i"]
         node_demand[i] = 0
         psse_bus_name = strip(data["name"])
-        bus_code_raw = get(bus_codes, psse_bus_name, nothing)
+        bus_code_raw = isempty(bus_codes) ? psse_bus_name[1:3] : get(bus_codes, psse_bus_name, nothing)
         if ismissing(bus_code_raw) || isnothing(bus_code_raw)
             @warn "couldn't find bus code for $psse_bus_name"
             bus_code_raw = "MISSING_BUS_CODE"
