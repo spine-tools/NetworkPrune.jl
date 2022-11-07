@@ -1,14 +1,14 @@
 #############################################################################
-# Copyright (C) 2017 - 2018  Spine Project
+# Copyright (C) 2017 - 2022  Spine Project
 #
-# This file is part of Spine Model.
+# This file is part of NetworkPrune.
 #
-# Spine Model is free software: you can redistribute it and/or modify
+# NetworkPrune is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# Spine Model is distributed in the hope that it will be useful,
+# NetworkPrune is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
@@ -16,12 +16,7 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #############################################################################
-"""
-    psse_to_spine(psse_path, db_url)
 
-Parse the psse raw file (`psse_path`) using PowerModels.jl
-and create a SpineOpt model at `db_url` using `nodes`, `units` and `connections`.
-"""
 
 struct FilteredIO <: IO
     inner::IO
@@ -30,15 +25,21 @@ end
 
 Base.readlines(io::FilteredIO) = filter!(io.flt, readlines(io.inner))
 
-function psse_to_spine(psse_path, db_url::String; skip=())
+"""
+    psse_to_spine(psse_path, db_url)
+
+Parse the psse raw file (`psse_path`) using PowerModels.jl
+and create a SpineOpt model at `db_url` using `nodes`, `units` and `connections`.
+"""
+function psse_to_spine(psse_path, db_url::String; skip=(), bus_codes=Dict())
     pm_data = open(psse_path) do io
         filtered_io = FilteredIO(io, line -> !startswith(line, "@!") && !isempty(strip(line)))
         PowerModels.parse_psse(filtered_io)
     end
-    psse_to_spine(pm_data, db_url; skip=skip)
+    psse_to_spine(pm_data, db_url; skip=skip, bus_codes=bus_codes)
 end
-function psse_to_spine(ps_system::Dict, db_url::String; skip=())
-    
+function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict())
+
     objects = []
     object_groups = []
     relationships = []
@@ -48,6 +49,7 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=())
     object_parameters = [
         ("node", "minimum_voltage"),
         ("node", "psse_bus_name"),
+        ("node", "bus_code"),
         ("node", "voltage")
     ]
 
@@ -73,11 +75,19 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=())
         data = b[2]
         i = data["bus_i"]
         node_demand[i] = 0
+        psse_bus_name = strip(data["name"])
+        bus_code_raw = get(bus_codes, psse_bus_name, nothing)
+        if ismissing(bus_code_raw) || isnothing(bus_code_raw)
+            @warn "couldn't find bus code for $psse_bus_name"
+            bus_code_raw = "MISSING_BUS_CODE"
+        end
+        bus_code = replace(bus_code_raw, "-" => "_")
         voltage_level = Int(round(data["base_kv"], digits=0))
-        node_name[i] = name = join([i, data["name"][1:3], voltage_level], "_")
+        node_name[i] = name = join([i, bus_code, voltage_level], "_")
         push!(objects, ("node", name))
         push!(object_parameter_values, ("node", name, "voltage", data["base_kv"]))
-        push!(object_parameter_values, ("node", name, "psse_bus_name", strip(data["name"])))        
+        push!(object_parameter_values, ("node", name, "psse_bus_name", psse_bus_name))        
+        push!(object_parameter_values, ("node", name, "bus_code", bus_code))        
 
         if data["bus_type"] == 3
             push!(object_parameter_values, ("node", name, "node_opf_type", "node_opf_type_reference"))

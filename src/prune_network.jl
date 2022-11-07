@@ -1,14 +1,14 @@
 #############################################################################
-# Copyright (C) 2017 - 2018  Spine Project
+# Copyright (C) 2017 - 2022  Spine Project
 #
-# This file is part of Spine Model.
+# This file is part of NetworkPrune.
 #
-# Spine Model is free software: you can redistribute it and/or modify
+# NetworkPrune is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# Spine Model is distributed in the hope that it will be useful,
+# NetworkPrune is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
@@ -16,6 +16,8 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #############################################################################
+
+
 function prune_network(db_url::String, prunned_db_url::String)
     con__mon = []  # set of monitored and contingent line tuples that must be considered as defined by the
                    # connection_monitored and connection_contingency parameters
