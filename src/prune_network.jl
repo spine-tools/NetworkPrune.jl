@@ -246,12 +246,12 @@ function traverse(I, n_t, n, traversed, node__new_nodes, min_v, ptdf_conn_n, ptd
 end
 
 """
-Actually,
-the first check is if a node is only connected to one other node.
-if there is nothing connected, delete it and the connection regardless of reactance
-[redundant because there are no capacitors in the pruned DB]. Then, if there is only a capacitor, you delete it and the connection regardless of reactance
-If there is only a load, you move the load and delete the node and connection regardless of reactance
-If there is generation and the reactance is 0.0001, you move the generation and delete the node and connection. If the reactance is not 0.0001 you do nothing
+If a node is connected to only one other node:
+- If there is no demand or generation, delete then node and connection regardless of reactance
+- If there is only a demand, move the demand and delete the node and connection regardless of reactance
+- If there is generation:
+    - If the reactance is lower or equal than 0.0001, then move the generation and delete the node and connection.
+    - If the reactance is greater than 0.0001, then do nothing
 """
 function trim_tails(prunned_db_url::String; alternative="Base")
     P = Module()
