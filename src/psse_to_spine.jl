@@ -39,38 +39,26 @@ function psse_to_spine(psse_path, db_url::String; skip=(), bus_codes=Dict(), alt
     psse_to_spine(pm_data, db_url; skip=skip, bus_codes=bus_codes, alternative=alternative)
 end
 function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(), alternative="Base")
-
     objects = []
     object_groups = []
     relationships = []
     object_parameter_values = []
     relationship_parameter_values = []
-
     object_parameters = [
-        ("node", "minimum_voltage"),
-        ("node", "psse_bus_name"),
-        ("node", "bus_code"),
-        ("node", "voltage")
+        ("node", "minimum_voltage"), ("node", "psse_bus_name"), ("node", "bus_code"), ("node", "voltage")
     ]
-
     commodity_name = "elec"
-
-    baseMVA = ps_system["baseMVA"]
-
-    areas = []
-    zones = []
-
     push!(objects, ["commodity", commodity_name])
-
     push!(object_parameter_values, ("commodity", commodity_name, "commodity_lodf_tolerance", 0.1))
     push!(object_parameter_values, ("commodity", commodity_name, "commodity_physics", "commodity_physics_ptdf"))
     push!(object_parameter_values, ("commodity", commodity_name, "commodity_ptdf_flow_tolerance", 0.1))
     push!(object_parameter_values, ("commodity", commodity_name, "commodity_ptdf_threshold", 0.0001))
     push!(object_parameter_values, ("commodity", commodity_name, "commodity_slack_penalty", 1000))
-
+    baseMVA = ps_system["baseMVA"]
+    areas = []
+    zones = []
     node_demand = Dict{Int64,Float64}()
     node_name = Dict{Int64,String}()
-
     for b in ps_system["bus"]
         data = b[2]
         i = data["bus_i"]
@@ -88,11 +76,9 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
         push!(object_parameter_values, ("node", name, "voltage", data["base_kv"]))
         push!(object_parameter_values, ("node", name, "psse_bus_name", psse_bus_name))        
         push!(object_parameter_values, ("node", name, "bus_code", bus_code))        
-
         if data["bus_type"] == 3
             push!(object_parameter_values, ("node", name, "node_opf_type", "node_opf_type_reference"))
         end
-
         area_name = string("area_", data["area"])
         zone_name = string("zone_", data["zone"])
         if !(area_name in areas)
@@ -101,19 +87,13 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
             push!(object_parameter_values, ("node", area_name, "minimum_voltage", 110.0))
         end        
         push!(object_groups, ["node", area_name, name])
-
         if !(zone_name in zones)
             push!(zones, zone_name)
             push!(objects, ("node", zone_name))
         end        
         push!(object_groups, ["node", zone_name, name])
-
-        obj_list = []
-        push!(obj_list, name)
-        push!(obj_list, "elec")
-        push!(relationships,("node__commodity", obj_list))
+        push!(relationships, ("node__commodity", [name, "elec"]))
     end
-
     for b in ("branch" in skip ? () : ps_system["branch"])
         data = b[2]
         if data["br_status"] in (0, 1)
@@ -129,35 +109,24 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
             push!(object_parameter_values, ("connection", name, "connection_monitored", 1))
             push!(object_parameter_values, ("connection", name, "connection_contingency", 1))
             push!(object_parameter_values, ("connection", name, "connection_availability_factor", 1.0))
-            obj_list = []
-            push!(obj_list, name)
-            push!(obj_list, to_bus_name)
-            push!(relationships, ("connection__to_node", obj_list))
+            rel = [name, to_bus_name]
+            push!(relationships, ("connection__to_node", rel))
             rate_a = round(get(data, "rate_a", 0) * baseMVA, digits=2)
             if haskey(data, "rate_b")
                 rate_b = round(data["rate_b"] * baseMVA, digits=2)
             else
                 rate_b = rate_a
             end
-
-            push!(relationship_parameter_values, ("connection__to_node", obj_list, "connection_capacity", rate_a))
+            push!(relationship_parameter_values, ("connection__to_node", rel, "connection_capacity", rate_a))
+            push!(relationship_parameter_values, ("connection__to_node", rel, "connection_emergency_capacity", rate_b))
+            rel = [name, from_bus_name]
+            push!(relationships, ("connection__from_node", rel))
+            push!(relationship_parameter_values, ("connection__from_node", rel, "connection_capacity", rate_a))
             push!(
-                relationship_parameter_values,
-                ("connection__to_node", obj_list, "connection_emergency_capacity", rate_b)
-            )
-
-            obj_list = []
-            push!(obj_list, name)
-            push!(obj_list, from_bus_name)
-            push!(relationships, ("connection__from_node", obj_list))
-            push!(relationship_parameter_values, ("connection__from_node", obj_list, "connection_capacity", rate_a))
-            push!(
-                relationship_parameter_values,
-                ("connection__from_node", obj_list, "connection_emergency_capacity", rate_b)
+                relationship_parameter_values, ("connection__from_node", rel, "connection_emergency_capacity", rate_b)
             )
         end
     end
-
     for dc in ("dcline" in skip ? () : ps_system["dcline"])
         data = dc[2]
         from_bus_name = node_name[data["source_id"][2]]
@@ -167,29 +136,21 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
         connection = ("connection", name)
         pmaxt = round(data["pmaxt"]  * baseMVA, digits=2)
         pmaxf = round(data["pmaxf"]  * baseMVA, digits=2)
-
         push!(objects, connection)
         push!(object_parameter_values, ("connection", name, "connection_resistance", 0))
         push!(object_parameter_values, ("connection", name, "connection_reactance", 0.0001))
         push!(object_parameter_values, ("connection", name, "connection_monitored", 0))
         push!(object_parameter_values, ("connection", name, "connection_contingency", 0))
         push!(object_parameter_values, ("connection", name, "connection_availability_factor", 1.0))
-
-        obj_list = []
-        push!(obj_list, name)
-        push!(obj_list, to_bus_name)
-        push!(relationships,("connection__to_node",obj_list))
-        push!(relationship_parameter_values, ("connection__to_node", obj_list, "connection_capacity", pmaxt))
-        push!(relationship_parameter_values, ("connection__to_node", obj_list, "connection_emergency_capacity", pmaxt))
-
-        obj_list = []
-        push!(obj_list, name)
-        push!(obj_list, from_bus_name)
-        push!(relationships,("connection__from_node",obj_list))
-        push!(relationship_parameter_values, ("connection__from_node", obj_list, "connection_capacity", pmaxf))
-        push!(relationship_parameter_values, ("connection__from_node", obj_list, "connection_emergency_capacity", pmaxf))
+        rel = [name, to_bus_name]
+        push!(relationships,("connection__to_node", rel))
+        push!(relationship_parameter_values, ("connection__to_node", rel, "connection_capacity", pmaxt))
+        push!(relationship_parameter_values, ("connection__to_node", rel, "connection_emergency_capacity", pmaxt))
+        rel = [name, from_bus_name]
+        push!(relationships, ("connection__from_node", rel))
+        push!(relationship_parameter_values, ("connection__from_node", rel, "connection_capacity", pmaxf))
+        push!(relationship_parameter_values, ("connection__from_node", rel, "connection_emergency_capacity", pmaxf))
     end
-
     gen_ids = []
     for g in ("gen" in skip ? () : ps_system["gen"])
         data = g[2]
@@ -205,35 +166,27 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
             name = new_name
         end
         push!(gen_ids, name)
-
-        unit = ("unit", name)
-        push!(objects, unit)
+        push!(objects, ("unit", name))
         push!(object_parameter_values, ("unit", name, "number_of_units", 1))
         push!(object_parameter_values, ("unit", name, "online_variable_type", "unit_online_variable_type_binary"))
         push!(object_parameter_values, ("unit", name, "unit_availability_factor", 1))
-
-        obj_list = []
-        push!(obj_list, name)
-        push!(obj_list, bus_name)
-        push!(relationships, ("unit__to_node", obj_list))
-
+        rel = [name, bus_name]
+        push!(relationships, ("unit__to_node", rel))
         push!(
             relationship_parameter_values,
-            ("unit__to_node", obj_list, "unit_capacity", round(data["pmax"] * baseMVA, digits=2))
+            ("unit__to_node", rel, "unit_capacity", round(data["pmax"] * baseMVA, digits=2))
         )
         pmin = round(data["pmin"] / data["pmax"], digits=4)
         if pmin isa Number
-            push!(relationship_parameter_values, ("unit__to_node", obj_list, "minimum_operating_point", pmin))
+            push!(relationship_parameter_values, ("unit__to_node", rel, "minimum_operating_point", pmin))
         end
     end
-
     for l in ps_system["load"]
         data = l[2]
         if data["status"] == 1
             node_demand[data["load_bus"]] = node_demand[data["load_bus"]] + data["pd"]
         end
     end
-
     for b in ps_system["bus"]
         data = b[2]
         name = node_name[data["bus_i"]]
@@ -243,17 +196,13 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
         end
     end
     @info "writing PSSE data to $(db_url)"
-
     added, err_log = import_data(db_url, SpineOpt.template(), "Load SpineOpt template")
     if !isempty(err_log)
         @error join(err_log, "\n")
     end
-
     @info "importing data to $(db_url)"
-
     object_parameter_values = [(opv..., alternative) for opv in object_parameter_values]
     relationship_parameter_values = [(opv..., alternative) for opv in relationship_parameter_values]
-
     comment = "Import powersystems to Spine"
     added, err_log = import_data(
         db_url,
@@ -269,7 +218,5 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
     if !isempty(err_log)
         @error join(err_log, "\n")
     end
-
     @info "data imported to $(db_url)"
-
 end
