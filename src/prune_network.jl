@@ -216,8 +216,9 @@ function prune_network(db_url::String, prunned_db_url::String; alternative="Base
     _prune_and_import(prunned_db_url, to_prune_object_keys, data_to_import, comment)
     @info "Network pruned successfully" nodes_pruned connections_pruned units_moved units_distributed demands_moved demands_distributed
     k = 1
-    @info "Trimming tails - pass $k"
-    while trim_tails(prunned_db_url; alternative=alternative)
+    while true
+        @info "Trimming tails - pass $k"
+        trim_tails(prunned_db_url; alternative=alternative) || break
         k += 1
     end
 end
