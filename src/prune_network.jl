@@ -49,7 +49,8 @@ function prune_network(db_url::String, prunned_db_url::String; alternative="Base
     min_v = 0
     for n in I.node__commodity(commodity=comm)
         push!(comm_nodes, n)
-        if !isempty(I.unit__to_node(node=n)) || I.demand(node=n) > 0
+        #if !isempty(I.unit__to_node(node=n)) || I.demand(node=n) > 0
+        if true # for some reason, I was only mapping nodes with load or generation, but we want to map all nodes, right?
             for ng in groups(n)
                 if I.minimum_voltage(node=ng) != nothing
                     min_v = I.minimum_voltage(node=ng)
@@ -112,9 +113,8 @@ function prune_network(db_url::String, prunned_db_url::String; alternative="Base
                 break
             end            
         end
-    end
-    @info "Writing output"
-    write_node__new_nodes(I, node__new_nodes)
+    end    
+    
     new_demand_dict = Dict{Object,Float64}()
     new_gen_dict = Dict{Object,Float64}()
     gens_to_move = Dict{Object,Object}()
@@ -218,9 +218,14 @@ function prune_network(db_url::String, prunned_db_url::String; alternative="Base
     k = 1
     while true
         @info "Trimming tails - pass $k"
-        trim_tails(prunned_db_url; alternative=alternative) || break
+        trim_tails(prunned_db_url,node__new_nodes; alternative=alternative) || break
         k += 1
     end
+
+    @info "Writing node mapping"
+
+    write_node__new_nodes(I, node__new_nodes)
+
 end
 
 function traverse(I, n_t, n, traversed, node__new_nodes, min_v, ptdf_conn_n, ptdf)
@@ -254,7 +259,7 @@ If a node is connected to only one other node:
     - If the reactance is lower or equal than 0.0001, then move the generation and delete the node and connection.
     - If the reactance is greater than 0.0001, then do nothing
 """
-function trim_tails(prunned_db_url::String; alternative="Base")
+function trim_tails(prunned_db_url::String, node__new_nodes; alternative="Base")
     P = Module()
     @eval P using SpineInterface
     using_spinedb(prunned_db_url, P)
@@ -304,8 +309,12 @@ function trim_tails(prunned_db_url::String; alternative="Base")
         react = P.connection_reactance(connection=conn)
         if isempty(units) || react <= 0.0001
             # remove tail and conn
-            push!(get!(to_remove, :node, []), tail_node)
+            push!(get!(to_remove, :node, []), tail_node)            
             push!(get!(to_remove, :connection, []), conn)
+
+            # save mapping
+            push!(get!(node__new_nodes, tail_node, []), (next_node, 1))
+
             # move any tail demand to next
             if !isnothing(tail_demand) && !iszero(tail_demand)
                 push!(get!(new_demands, next_node, []), tail_demand)
