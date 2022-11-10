@@ -327,7 +327,10 @@ function trim_tails(prunned_db_url::String, node__new_nodes; alternative="Base")
         push!(opvs, ("node", next_node.name, "demand", unparse_db_value(new_demand), alternative))
     end
     to_prune_object_keys = [(class_name, x.name) for (class_name, objects) in to_remove for x in objects]
-    isempty(to_prune_object_keys) && return false
+    if isempty(to_prune_object_keys)
+        @info "No tails left to trim"
+        return false
+    end
     data_to_import = Dict(:relationships => rels, :object_parameter_values => opvs, :alternatives => [alternative])
     comment = "Network pruning: trim tails"
     _prune_and_import(prunned_db_url, to_prune_object_keys, data_to_import, comment)
@@ -335,7 +338,7 @@ function trim_tails(prunned_db_url::String, node__new_nodes; alternative="Base")
     connections_pruned = length(get(to_remove, :connection, ()))
     units_moved = length(rels)
     demands_moved = length(opvs)
-    @info "network tails trimmed successfully" nodes_pruned connections_pruned units_moved demands_moved
+    @info "Network tails trimmed successfully" nodes_pruned connections_pruned units_moved demands_moved
     true
 end
 
@@ -347,9 +350,9 @@ function _prune_and_import(prunned_db_url, to_prune_object_keys, data_to_import,
     ]
     run_request(prunned_db_url, "call_method", ("cascade_remove_items",), Dict(:object => to_prune_object_ids))
     added, err_log = import_data(prunned_db_url, ""; data_to_import...)
-    @info "added $(added) items"
+    @info "Added $(added) items"
     for err in err_log
-        @info "import error: " err
+        @info "Import error: " err
     end
     run_request(prunned_db_url, "call_method", ("commit_session", comment))
 end
