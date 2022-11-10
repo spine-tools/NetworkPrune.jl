@@ -48,11 +48,12 @@ function prune_network(
     relationship_parameter_values = []
     inj_nodes = []
     comm_nodes = []
-    min_v = 0
     for n in I.node__commodity(commodity=comm)
         push!(comm_nodes, n)
+        I.is_transformer_starbus(node=n) == true && continue
         # isempty(I.unit__to_node(node=n)) && (isnothing(I.demand(node=n)) || iszero(I.demand(node=n))) && continue
         # for some reason, I was only mapping nodes with load or generation, but we want to map all nodes, right?
+        min_v = 0
         for ng in groups(n)
             if I.minimum_voltage(node=ng) != nothing
                 min_v = I.minimum_voltage(node=ng)
@@ -66,19 +67,11 @@ function prune_network(
     # @info "Writing ptdf diagnostic file"
     # write_ptdfs(I, ptdf_conn_n, comm_nodes)
     @info "Traversing nodes"
-    traversed = Dict{Object,Bool}()
     node__new_nodes = Dict(n => [] for n in inj_nodes)
     for n in inj_nodes
-        for n2 in comm_nodes
-            traversed[n2] = false
-        end
-        min_v = 0
-        for ng in groups(n)
-            if ! (I.minimum_voltage(node=ng) == nothing)
-                min_v = I.minimum_voltage(node=ng)
-                break
-            end
-        end
+        traversed = Dict(n2 => false for n2 in comm_nodes)
+        min_voltages = (I.minimum_voltage(node=ng) for ng in groups(n))
+        min_v = first(v for v in min_voltages if v != nothing)
         traverse(I, n, n, traversed, node__new_nodes, min_v, ptdf_conn_n, 1)
     end
     to_prune_object_keys = []
@@ -89,6 +82,7 @@ function prune_network(
     demands_moved = 0
     demands_distributed = 0    
     for n in comm_nodes
+        I.is_transformer_starbus(node=n) == true && continue
         for ng in groups(n)            
             if I.minimum_voltage(node=ng) != nothing
                 min_v = I.minimum_voltage(node=ng)
@@ -219,6 +213,8 @@ function prune_network(
         trim_tails(prunned_db_url, node__new_nodes; alternative=alternative) || break
         k += 1
     end
+    @info "Replacing starbusses by delta connections"    
+    _replace_starbusses(prunned_db_url; alternative=alternative)
     @info "Writing node mapping"    
     path = joinpath(pwd(), node_mapping_file_name)
     write_node__new_nodes(I, node__new_nodes, path)
@@ -226,6 +222,7 @@ function prune_network(
 end
 
 function traverse(I, n_t, n, traversed, node__new_nodes, min_v, ptdf_conn_n, ptdf)
+    traversed[n] && return
     # @info "traversing $(n) for $(n_t) with voltage $(voltage(node=n)) and min voltage $(min_v)"
     traversed[n] = true
     if I.voltage(node=n) >= min_v
@@ -233,16 +230,12 @@ function traverse(I, n_t, n, traversed, node__new_nodes, min_v, ptdf_conn_n, ptd
     else
         for conn in I.connection__from_node(node=n)
             for n2 in I.connection__to_node(connection=conn)
-                if !traversed[n2]
-                    traverse(I, n_t, n2, traversed, node__new_nodes, min_v, ptdf_conn_n, ptdf_conn_n[(conn, n_t)])
-                end
+                traverse(I, n_t, n2, traversed, node__new_nodes, min_v, ptdf_conn_n, ptdf_conn_n[(conn, n_t)])
             end
         end
         for conn in I.connection__to_node(node=n)
             for n2 in I.connection__from_node(connection=conn)
-                if !traversed[n2]
-                    traverse(I, n_t, n2, traversed, node__new_nodes, min_v, ptdf_conn_n, ptdf_conn_n[(conn, n_t)])
-                end
+                traverse(I, n_t, n2, traversed, node__new_nodes, min_v, ptdf_conn_n, ptdf_conn_n[(conn, n_t)])
             end
         end
     end
@@ -306,7 +299,7 @@ function trim_tails(prunned_db_url::String, node__new_nodes; alternative="Base")
         react = P.connection_reactance(connection=conn)
         if isempty(units) || react <= 0.0001
             # remove tail and conn
-            push!(get!(to_remove, :node, []), tail_node)            
+            push!(get!(to_remove, :node, []), tail_node)
             push!(get!(to_remove, :connection, []), conn)
             # save mapping
             push!(get!(node__new_nodes, tail_node, []), (next_node, 1))
@@ -340,6 +333,81 @@ function trim_tails(prunned_db_url::String, node__new_nodes; alternative="Base")
     demands_moved = length(opvs)
     @info "Network tails trimmed successfully" nodes_pruned connections_pruned units_moved demands_moved
     true
+end
+
+function _replace_starbusses(prunned_db_url; alternative="Base")
+    P = Module()
+    @eval P using SpineInterface
+    using_spinedb(prunned_db_url, P)
+    comm = first(
+        c for c in P.commodity()
+        if P.commodity_physics(commodity=c) in (:commodity_physics_ptdf, :commodity_physics_lodf)
+    )
+    starbusses_with_two_connections = 0
+    starbusses_with_three_connections = 0
+    to_remove = Dict()
+    objs = []
+    rels = []
+    opvs = []
+    for n in P.node(is_transformer_starbus=true)
+        comm in P.node__commodity(node=n) || continue
+        conns = vcat(P.connection__from_node(node=n), P.connection__to_node(node=n))
+        if length(conns) > 3
+            @warn "Skipping starbus $(n.name) because it has more than 3 connections!"
+            continue
+        end
+        nodes_per_conn = Dict(
+            conn => [
+                n2
+                for n2 in vcat(P.connection__from_node(connection=conn), P.connection__to_node(connection=conn))
+                if n2 != n
+            ]
+            for conn in conns
+        )
+        if !all(length(nodes) == 1 for nodes in values(nodes_per_conn))
+            @warn "Skipping starbus $(n.name) because it is connected to more than one bus via one of its connections!"
+            continue
+        end
+        push!(get!(to_remove, :node, []), n)
+        append!(get!(to_remove, :connection, []), conns)
+        node_per_conn = Dict(conn => first(nodes) for (conn, nodes) in nodes_per_conn)
+        if length(conns) == 2
+            starbusses_with_two_connections += 1
+            n_from, n_to = [node_per_conn[conn] for conn in conns]
+            conn_name_parts = ["TX", n_from.name, n_to.name, P.psse_bus_name(node=n)]
+            conn_name = join(conn_name_parts, "__")
+            br_r = sum(P.connection_resistance(connection=conn) for conn in conns)
+            br_x = sum(P.connection_reactance(connection=conn) for conn in conns)
+            push!(objs, ("connection", conn_name))
+            push!(opvs, ("connection", conn_name, "connection_resistance", br_r, alternative))
+            push!(opvs, ("connection", conn_name, "connection_reactance", br_x, alternative))
+            push!(rels, ("connection__from_node", (conn_name, n_from.name)))
+            push!(rels, ("connection__to_node", (conn_name, n_to.name)))
+        elseif length(conns) == 3
+            starbusses_with_three_connections += 1
+            # TODO
+            # Do the star to delta thing
+        else
+        end
+    end
+    for (class_name, obj_name) in objs
+        class_name == "connection" || continue
+        push!(opvs, ("connection", obj_name, "connection_monitored", 1, alternative))
+        push!(opvs, ("connection", obj_name, "connection_contingency", 1, alternative))
+        push!(opvs, ("connection", obj_name, "connection_availability_factor", 1.0, alternative))
+        push!(opvs, ("connection", obj_name, "connection_type", :connection_type_lossless_bidirectional, alternative))
+    end
+    to_prune_object_keys = [(class_name, x.name) for (class_name, objects) in to_remove for x in objects]
+    if isempty(to_prune_object_keys)
+        @info "No starbusses to replace"
+        return
+    end
+    data_to_import = Dict(
+        :objects => objs, :relationships => rels, :object_parameter_values => opvs, :alternatives => [alternative]
+    )
+    comment = "Network pruning: replace starbusses by delta connections"
+    _prune_and_import(prunned_db_url, to_prune_object_keys, data_to_import, comment)
+    @info "Starbusses replaced successfully" starbusses_with_two_connections starbusses_with_three_connections
 end
 
 function _prune_and_import(prunned_db_url, to_prune_object_keys, data_to_import, comment)

@@ -45,7 +45,11 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
     object_parameter_values = []
     relationship_parameter_values = []
     object_parameters = [
-        ("node", "minimum_voltage"), ("node", "psse_bus_name"), ("node", "bus_code"), ("node", "voltage")
+        ("node", "minimum_voltage"),
+        ("node", "psse_bus_name"),
+        ("node", "bus_code"),
+        ("node", "voltage"),
+        ("node", "is_transformer_starbus")
     ]
     commodity_name = "elec"
     push!(objects, ["commodity", commodity_name])
@@ -66,7 +70,7 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
         psse_bus_name = strip(data["name"])
         bus_code = get(bus_codes, psse_bus_name, nothing)
         if ismissing(bus_code) || isnothing(bus_code)
-            #bus_code = string(psse_bus_name[1:3], "*")
+            # bus_code = string(psse_bus_name[1:3], "*")
             bus_code = psse_bus_name
         end
         voltage_level = Int(round(data["base_kv"], digits=0))
@@ -74,7 +78,10 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
         push!(objects, ("node", name))
         push!(object_parameter_values, ("node", name, "voltage", data["base_kv"]))
         push!(object_parameter_values, ("node", name, "psse_bus_name", psse_bus_name))        
-        push!(object_parameter_values, ("node", name, "bus_code", bus_code))        
+        push!(object_parameter_values, ("node", name, "bus_code", bus_code))
+        if startswith(psse_bus_name, "starbus_")
+            push!(object_parameter_values, ("node", name, "is_transformer_starbus", true))        
+        end
         if data["bus_type"] == 3
             push!(object_parameter_values, ("node", name, "node_opf_type", "node_opf_type_reference"))
         end
@@ -99,7 +106,11 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
             from_bus_name = node_name[data["f_bus"]]
             to_bus_name =  node_name[data["t_bus"]]
             ckt = rstrip(string(data["source_id"][4]))
-            name = string(from_bus_name, "__", to_bus_name, "__", ckt)
+            name_parts = [from_bus_name, to_bus_name, ckt]
+            if data["transformer"]
+                pushfirst!(name_parts, "TX")
+            end
+            name = join(name_parts, "__")
             connection = ("connection", name)
             push!(objects, connection)
             br_r = data["br_r"]
@@ -108,6 +119,10 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
             push!(object_parameter_values, ("connection", name, "connection_monitored", 1))
             push!(object_parameter_values, ("connection", name, "connection_contingency", 1))
             push!(object_parameter_values, ("connection", name, "connection_availability_factor", 1.0))
+            push!(
+                object_parameter_values,
+                ("connection", name, "connection_type", :connection_type_lossless_bidirectional)
+            )
             rel = [name, to_bus_name]
             push!(relationships, ("connection__to_node", rel))
             rate_a = round(get(data, "rate_a", 0) * baseMVA, digits=2)
