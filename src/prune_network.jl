@@ -365,7 +365,7 @@ function _replace_starbusses(prunned_db_url; alternative="Base")
             for conn in conns
         )
         if !all(length(nodes) == 1 for nodes in values(nodes_per_conn))
-            @warn "Skipping starbus $(n.name) because it is connected to more than one bus via one of its connections!"
+            @warn "Skipping starbus $(n.name) because it is connected to more than one node via one of its connections!"
             continue
         end
         push!(get!(to_remove, :node, []), n)
@@ -376,17 +376,29 @@ function _replace_starbusses(prunned_db_url; alternative="Base")
             n_from, n_to = [node_per_conn[conn] for conn in conns]
             conn_name_parts = ["TX", n_from.name, n_to.name, P.psse_bus_name(node=n)]
             conn_name = join(conn_name_parts, "__")
-            br_r = sum(P.connection_resistance(connection=conn) for conn in conns)
-            br_x = sum(P.connection_reactance(connection=conn) for conn in conns)
+            r = sum(P.connection_resistance(connection=conn) for conn in conns)
+            x = sum(P.connection_reactance(connection=conn) for conn in conns)
             push!(objs, ("connection", conn_name))
-            push!(opvs, ("connection", conn_name, "connection_resistance", br_r, alternative))
-            push!(opvs, ("connection", conn_name, "connection_reactance", br_x, alternative))
+            push!(opvs, ("connection", conn_name, "connection_resistance", r, alternative))
+            push!(opvs, ("connection", conn_name, "connection_reactance", x, alternative))
             push!(rels, ("connection__from_node", (conn_name, n_from.name)))
             push!(rels, ("connection__to_node", (conn_name, n_to.name)))
         elseif length(conns) == 3
             starbusses_with_three_connections += 1
-            # TODO
-            # Do the star to delta thing
+            total_r = sum(P.connection_resistance(connection=conn) for conn in conns)
+            total_x = sum(P.connection_reactance(connection=conn) for conn in conns)
+            for conn in conns
+                n_from, n_to = [node_per_conn[other_conn] for other_conn in conns if other_conn != conn]
+                conn_name_parts = ["TX", n_from.name, n_to.name, P.psse_bus_name(node=n)]
+                conn_name = join(conn_name_parts, "__")
+                r = total_r / P.connection_resistance(connection=conn)
+                x = total_x / P.connection_reactance(connection=conn)
+                push!(objs, ("connection", conn_name))
+                push!(opvs, ("connection", conn_name, "connection_resistance", r, alternative))
+                push!(opvs, ("connection", conn_name, "connection_reactance", x, alternative))
+                push!(rels, ("connection__from_node", (conn_name, n_from.name)))
+                push!(rels, ("connection__to_node", (conn_name, n_to.name)))
+            end
         else
         end
     end
