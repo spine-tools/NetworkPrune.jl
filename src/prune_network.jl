@@ -115,14 +115,14 @@ function prune_network(
     new_demand_dict = Dict{Object,Float64}()
     new_gen_dict = Dict{Object,Float64}()
     gens_to_move = Dict{Object,Object}()
-    for (n, data) in node__new_nodes
+    for (n, new_nodes) in node__new_nodes
         if I.demand(node=n) == nothing
             demand_to_shift = 0
         else
             demand_to_shift = I.demand(node=n)
         end
-        if size(data, 1) == 1  # only one connected higher voltage node, move all the demand here
-            n2, _ptdf = data[1]
+        if size(new_nodes, 1) == 1  # only one connected higher voltage node, move all the demand here
+            n2, _ptdf = new_nodes[1]
             if demand_to_shift > 0
                 if haskey(new_demand_dict, n2)
                     new_demand_dict[n2] += demand_to_shift
@@ -142,7 +142,7 @@ function prune_network(
                 push!(to_prune_object_keys, (u.class_name, u.name))                    
                 units_distributed += 1
             end
-            for (n2, ptdf) in data
+            for (n2, ptdf) in new_nodes
                 ptdf = abs(ptdf)
                 if demand_to_shift > 0
                     if haskey(new_demand_dict, n2)
@@ -358,7 +358,7 @@ function write_node__new_nodes(I, node__new_nodes, path)
     io = open(path, "w")
     print(io, "node,V,total_gens,total_generation,total_demand,")
     print(io, "node1,V1,ptdf1,node2,V2,ptdf2,node3,V3,ptdf3,node4,V4,ptdf4,node5,V5,ptdf5\n")
-    for (n, data) in node__new_nodes
+    for (n, new_nodes) in node__new_nodes
         total_generators = 0
         total_generation = 0
         total_demand = 0
@@ -374,11 +374,11 @@ function write_node__new_nodes(I, node__new_nodes, path)
         print(
             io, string(n), ",", I.voltage(node=n), ",", total_generators, ",", total_generation, ",", total_demand
         )
-        if size(data, 1) == 1
-            n2, _ptdf = data[1]
+        if size(new_nodes, 1) == 1
+            n2, _ptdf = new_nodes[1]
             print(io, ",", string(n2), ",", I.voltage(node=n2), ",", 1)
         else
-            for (n2, ptdf) in data
+            for (n2, ptdf) in new_nodes
                 print(io, ",", string(n2), ",", I.voltage(node=n2), ",", string(abs(ptdf)))
             end
         end
