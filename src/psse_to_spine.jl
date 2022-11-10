@@ -66,7 +66,8 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
         psse_bus_name = strip(data["name"])
         bus_code = get(bus_codes, psse_bus_name, nothing)
         if ismissing(bus_code) || isnothing(bus_code)
-            bus_code = string(psse_bus_name[1:3], "*")
+            #bus_code = string(psse_bus_name[1:3], "*")
+            bus_code = psse_bus_name
         end
         voltage_level = Int(round(data["base_kv"], digits=0))
         node_name[i] = name = join([bus_code, voltage_level, i], "_")
