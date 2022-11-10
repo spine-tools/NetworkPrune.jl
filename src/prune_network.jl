@@ -17,7 +17,9 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #############################################################################
 
-function prune_network(db_url::String, prunned_db_url::String; alternative="Base")
+function prune_network(
+    db_url::String, prunned_db_url::String; alternative="Base", node_mapping_file_name="node_mapping.csv"
+)
     I = Module()
     @eval I using SpineInterface
     using_spinedb(db_url, I)
@@ -49,27 +51,23 @@ function prune_network(db_url::String, prunned_db_url::String; alternative="Base
     min_v = 0
     for n in I.node__commodity(commodity=comm)
         push!(comm_nodes, n)
-        #if !isempty(I.unit__to_node(node=n)) || I.demand(node=n) > 0
-        if true # for some reason, I was only mapping nodes with load or generation, but we want to map all nodes, right?
-            for ng in groups(n)
-                if I.minimum_voltage(node=ng) != nothing
-                    min_v = I.minimum_voltage(node=ng)
-                    break
-                end
+        # isempty(I.unit__to_node(node=n)) && (isnothing(I.demand(node=n)) || iszero(I.demand(node=n))) && continue
+        # for some reason, I was only mapping nodes with load or generation, but we want to map all nodes, right?
+        for ng in groups(n)
+            if I.minimum_voltage(node=ng) != nothing
+                min_v = I.minimum_voltage(node=ng)
+                break
             end
-            if I.voltage(node=n) < min_v
-                push!(inj_nodes, n)
-            end
+        end
+        if I.voltage(node=n) < min_v
+            push!(inj_nodes, n)
         end
     end
     # @info "Writing ptdf diagnostic file"
     # write_ptdfs(I, ptdf_conn_n, comm_nodes)
     @info "Traversing nodes"
     traversed = Dict{Object,Bool}()
-    node__new_nodes = Dict{Object,Array}()
-    for n in inj_nodes
-        node__new_nodes[n] = []
-    end
+    node__new_nodes = Dict(n => [] for n in inj_nodes)
     for n in inj_nodes
         for n2 in comm_nodes
             traversed[n2] = false
@@ -114,7 +112,6 @@ function prune_network(db_url::String, prunned_db_url::String; alternative="Base
             end            
         end
     end    
-    
     new_demand_dict = Dict{Object,Float64}()
     new_gen_dict = Dict{Object,Float64}()
     gens_to_move = Dict{Object,Object}()
@@ -125,16 +122,17 @@ function prune_network(db_url::String, prunned_db_url::String; alternative="Base
             demand_to_shift = I.demand(node=n)
         end
         if size(data, 1) == 1  # only one connected higher voltage node, move all the demand here
+            n2, _ptdf = data[1]
             if demand_to_shift > 0
-                if haskey(new_demand_dict, data[1][1])
-                    new_demand_dict[data[1][1]] += demand_to_shift
+                if haskey(new_demand_dict, n2)
+                    new_demand_dict[n2] += demand_to_shift
                 else
-                    new_demand_dict[data[1][1]] = demand_to_shift
+                    new_demand_dict[n2] = demand_to_shift
                 end
                 demands_moved += 1
             end
             for u in I.unit__to_node(node=n)
-                gens_to_move[u] = data[1][1]
+                gens_to_move[u] = n2
                 units_moved += 1
             end
         else
@@ -218,14 +216,13 @@ function prune_network(db_url::String, prunned_db_url::String; alternative="Base
     k = 1
     while true
         @info "Trimming tails - pass $k"
-        trim_tails(prunned_db_url,node__new_nodes; alternative=alternative) || break
+        trim_tails(prunned_db_url, node__new_nodes; alternative=alternative) || break
         k += 1
     end
-
-    @info "Writing node mapping"
-
-    write_node__new_nodes(I, node__new_nodes)
-
+    @info "Writing node mapping"    
+    path = joinpath(pwd(), node_mapping_file_name)
+    write_node__new_nodes(I, node__new_nodes, path)
+    @info "Node mapping written at $path"
 end
 
 function traverse(I, n_t, n, traversed, node__new_nodes, min_v, ptdf_conn_n, ptdf)
@@ -237,7 +234,7 @@ function traverse(I, n_t, n, traversed, node__new_nodes, min_v, ptdf_conn_n, ptd
         for conn in I.connection__from_node(node=n)
             for n2 in I.connection__to_node(connection=conn)
                 if !traversed[n2]
-                    traverse(I, n_t, n2, traversed, node__new_nodes, min_v, ptdf_conn_n, ptdf_conn_n[(conn, n_t)] )
+                    traverse(I, n_t, n2, traversed, node__new_nodes, min_v, ptdf_conn_n, ptdf_conn_n[(conn, n_t)])
                 end
             end
         end
@@ -311,10 +308,8 @@ function trim_tails(prunned_db_url::String, node__new_nodes; alternative="Base")
             # remove tail and conn
             push!(get!(to_remove, :node, []), tail_node)            
             push!(get!(to_remove, :connection, []), conn)
-
             # save mapping
             push!(get!(node__new_nodes, tail_node, []), (next_node, 1))
-
             # move any tail demand to next
             if !isnothing(tail_demand) && !iszero(tail_demand)
                 push!(get!(new_demands, next_node, []), tail_demand)
@@ -359,28 +354,32 @@ function _prune_and_import(prunned_db_url, to_prune_object_keys, data_to_import,
     run_request(prunned_db_url, "call_method", ("commit_session", comment))
 end
 
-function write_node__new_nodes(I, node__new_nodes)
-    io = open("node_mapping.csv", "w")
-    print(io, "node,V,total_gens,total_generation,total_demand,node1,V1,ptdf1,node2,V2,ptdf2,node3,V3,ptdf3,node4,V4,ptdf4,node5,V5,ptdf5\n")
-    for n in node__new_nodes
-        total_generators=0
-        total_generation=0
-        total_demand=0
-        for u in I.unit__to_node(node=n[1])
+function write_node__new_nodes(I, node__new_nodes, path)
+    io = open(path, "w")
+    print(io, "node,V,total_gens,total_generation,total_demand,")
+    print(io, "node1,V1,ptdf1,node2,V2,ptdf2,node3,V3,ptdf3,node4,V4,ptdf4,node5,V5,ptdf5\n")
+    for (n, data) in node__new_nodes
+        total_generators = 0
+        total_generation = 0
+        total_demand = 0
+        for u in I.unit__to_node(node=n)
             total_generators = total_generators + 1
-            total_generation = total_generation + I.unit_capacity(unit=u, node=n[1])
+            total_generation = total_generation + I.unit_capacity(unit=u, node=n)
         end
-        if I.demand(node=n[1]) == nothing
+        if I.demand(node=n) == nothing
             total_demand = 0
         else
-            total_demand = I.demand(node=n[1])
+            total_demand = I.demand(node=n)
         end
-        print(io, string(n[1]), ",", I.voltage(node=n[1]), ",", total_generators, ",", total_generation, ",", total_demand)
-        if size(n[2],1) == 1
-            print(io, ",", string(n[2][1][1]), ",", I.voltage(node=n[2][1][1]), ",", 1)
+        print(
+            io, string(n), ",", I.voltage(node=n), ",", total_generators, ",", total_generation, ",", total_demand
+        )
+        if size(data, 1) == 1
+            n2, _ptdf = data[1]
+            print(io, ",", string(n2), ",", I.voltage(node=n2), ",", 1)
         else
-            for n2 in n[2]
-                print(io, ",", string(n2[1]), ",", I.voltage(node=n2[1]), ",", string(abs(n2[2])))
+            for (n2, ptdf) in data
+                print(io, ",", string(n2), ",", I.voltage(node=n2), ",", string(abs(ptdf)))
             end
         end
         print(io, "\n")
