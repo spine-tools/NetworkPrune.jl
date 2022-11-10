@@ -64,14 +64,12 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
         i = data["bus_i"]
         node_demand[i] = 0
         psse_bus_name = strip(data["name"])
-        bus_code_raw = isempty(bus_codes) ? psse_bus_name[1:3] : get(bus_codes, psse_bus_name, nothing)
-        if ismissing(bus_code_raw) || isnothing(bus_code_raw)
-            @warn "couldn't find bus code for $psse_bus_name"
-            bus_code_raw = "MISSING_BUS_CODE"
+        bus_code = get(bus_codes, psse_bus_name, nothing)
+        if ismissing(bus_code) || isnothing(bus_code)
+            bus_code = string(psse_bus_name[1:3], "*")
         end
-        bus_code = replace(bus_code_raw, "-" => "_")
         voltage_level = Int(round(data["base_kv"], digits=0))
-        node_name[i] = name = join([i, bus_code, voltage_level], "_")
+        node_name[i] = name = join([bus_code, voltage_level, i], "_")
         push!(objects, ("node", name))
         push!(object_parameter_values, ("node", name, "voltage", data["base_kv"]))
         push!(object_parameter_values, ("node", name, "psse_bus_name", psse_bus_name))        
@@ -100,7 +98,7 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
             from_bus_name = node_name[data["f_bus"]]
             to_bus_name =  node_name[data["t_bus"]]
             ckt = rstrip(string(data["source_id"][4]))
-            name = string(from_bus_name, "__", to_bus_name, "_", ckt)
+            name = string(from_bus_name, "__", to_bus_name, "__", ckt)
             connection = ("connection", name)
             push!(objects, connection)
             br_r = data["br_r"]
