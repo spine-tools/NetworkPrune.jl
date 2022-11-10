@@ -67,7 +67,8 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
         bus_code_raw = isempty(bus_codes) ? psse_bus_name[1:3] : get(bus_codes, psse_bus_name, nothing)
         if ismissing(bus_code_raw) || isnothing(bus_code_raw)
             @warn "couldn't find bus code for $psse_bus_name"
-            bus_code_raw = "MISSING_BUS_CODE"
+            #bus_code_raw = "MISSING_BUS_CODE"
+            bus_code_raw = psse_bus_name
         end
         bus_code = replace(bus_code_raw, "-" => "_")
         voltage_level = Int(round(data["base_kv"], digits=0))
