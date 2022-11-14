@@ -3,6 +3,10 @@ uuid = "c072102b-c7f1-477f-983f-a572c7a1b9d5"
 authors = ["Manuel <chacarero@gmail.com> and contributors"]
 version = "0.1.0"
 
+[deps]
+PowerModels = "c36e90e8-916a-50a6-bd94-075b64ef4655"
+PowerSystems = "bcd98974-b02a-5e2f-9ee0-a103f5c450dd"
+
 [compat]
 julia = "1"
 
