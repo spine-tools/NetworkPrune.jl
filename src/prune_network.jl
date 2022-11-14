@@ -374,7 +374,8 @@ function _replace_starbusses(prunned_db_url; alternative="Base")
         if length(conns) == 2
             starbusses_with_two_connections += 1
             n_from, n_to = [node_per_conn[conn] for conn in conns]
-            conn_name_parts = ["TX", n_from.name, n_to.name, P.psse_bus_name(node=n)]
+            ckt = first(split(string(c.name), "__")[end] for c in conns)  # Circuit nb is the last part of the name
+            conn_name_parts = ["TX", n_from.name, n_to.name, ckt]
             conn_name = join(conn_name_parts, "__")
             r = sum(P.connection_resistance(connection=conn) for conn in conns)
             x = sum(P.connection_reactance(connection=conn) for conn in conns)
@@ -389,7 +390,8 @@ function _replace_starbusses(prunned_db_url; alternative="Base")
             total_x = sum(P.connection_reactance(connection=conn) for conn in conns)
             for conn in conns
                 n_from, n_to = [node_per_conn[other_conn] for other_conn in conns if other_conn != conn]
-                conn_name_parts = ["TX", n_from.name, n_to.name, P.psse_bus_name(node=n)]
+                ckt = split(string(conn.name), "__")[end]  # Circuit nb is the last part of the name
+                conn_name_parts = ["TX", n_from.name, n_to.name, ckt]
                 conn_name = join(conn_name_parts, "__")
                 r = total_r / P.connection_resistance(connection=conn)
                 x = total_x / P.connection_reactance(connection=conn)
