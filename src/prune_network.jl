@@ -110,12 +110,14 @@ function prune_network(
     new_gen_dict = Dict{Object,Float64}()
     gens_to_move = Dict{Object,Object}()
     for (n, new_nodes) in node__new_nodes
-
-        #if the reference node is pruned, set the first mapped node as the reference node
+        # if the reference node is pruned, set the first mapped node as the reference node
         if I.node_opf_type(node=n) == :node_opf_type_reference
-            push!(object_parameter_values, ("node", string(new_nodes[1]), "node_opf_type", :node_opf_type_reference))
+            first_mapped_node, _ptdf = first(new_nodes)
+            push!(
+                object_parameter_values,
+                ("node", string(first_mapped_node), "node_opf_type", :node_opf_type_reference, alternative)
+            )
         end
-
         if I.demand(node=n) == nothing
             demand_to_shift = 0
         else
