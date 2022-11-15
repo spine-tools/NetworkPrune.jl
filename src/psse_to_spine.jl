@@ -131,13 +131,18 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
             else
                 rate_b = rate_a
             end
+            if haskey(data, "rate_c")
+                rate_c = round(data["rate_c"] * baseMVA, digits=2)
+            else
+                rate_c = rate_b
+            end
             push!(relationship_parameter_values, ("connection__to_node", rel, "connection_capacity", rate_a))
-            push!(relationship_parameter_values, ("connection__to_node", rel, "connection_emergency_capacity", rate_b))
+            push!(relationship_parameter_values, ("connection__to_node", rel, "connection_emergency_capacity", rate_c))
             rel = [name, from_bus_name]
             push!(relationships, ("connection__from_node", rel))
             push!(relationship_parameter_values, ("connection__from_node", rel, "connection_capacity", rate_a))
             push!(
-                relationship_parameter_values, ("connection__from_node", rel, "connection_emergency_capacity", rate_b)
+                relationship_parameter_values, ("connection__from_node", rel, "connection_emergency_capacity", rate_c)
             )
         end
     end
