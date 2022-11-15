@@ -112,10 +112,11 @@ function prune_network(
     for (n, new_nodes) in node__new_nodes
         # if the reference node is pruned, set the first mapped node as the reference node
         if I.node_opf_type(node=n) == :node_opf_type_reference
-            first_mapped_node, _ptdf = first(new_nodes)
+            new_ref_node, _ptdf = first(new_nodes)
+            @info "Reference bus moved from $n to $new_ref_node"
             push!(
                 object_parameter_values,
-                ("node", string(first_mapped_node), "node_opf_type", :node_opf_type_reference, alternative)
+                ("node", string(new_ref_node), "node_opf_type", :node_opf_type_reference, alternative)
             )
         end
         if I.demand(node=n) == nothing
