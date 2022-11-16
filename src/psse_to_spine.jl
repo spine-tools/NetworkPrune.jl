@@ -115,9 +115,7 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
             push!(objects, connection)
             br_r = data["br_r"]
             push!(object_parameter_values, ("connection", name, "connection_resistance", isempty(br_r) ? 0 : br_r))
-            push!(object_parameter_values, ("connection", name, "connection_reactance", data["br_x"]))
-            push!(object_parameter_values, ("connection", name, "connection_monitored", 1))
-            push!(object_parameter_values, ("connection", name, "connection_contingency", 1))
+            push!(object_parameter_values, ("connection", name, "connection_reactance", data["br_x"]))            
             push!(object_parameter_values, ("connection", name, "connection_availability_factor", 1.0))
             push!(
                 object_parameter_values,
@@ -136,6 +134,15 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
             else
                 rate_c = rate_b
             end
+
+            if rate_a < 998.0
+                push!(object_parameter_values, ("connection", name, "connection_monitored", true))
+                push!(object_parameter_values, ("connection", name, "connection_contingency", true))
+            else
+                push!(object_parameter_values, ("connection", name, "connection_monitored", false))
+                push!(object_parameter_values, ("connection", name, "connection_contingency", false))
+            end
+
             push!(relationship_parameter_values, ("connection__to_node", rel, "connection_capacity", rate_a))
             push!(relationship_parameter_values, ("connection__to_node", rel, "connection_emergency_capacity", rate_c))
             rel = [name, from_bus_name]
