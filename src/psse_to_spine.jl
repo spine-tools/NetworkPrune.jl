@@ -253,11 +253,24 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
         @error join(err_log, "\n")
     end
 
+    base_alternative = alternative
+    base_scenario = alternative
+    no_monitoring_scenario = no_monitoring_alternative
+
     added, err_log = import_data(
         db_url,
         comment;        
         object_parameter_values=object_parameter_values_no_monitoring,
-        alternatives=[no_monitoring_alternative]
+        alternatives=[no_monitoring_alternative],
+        scenarios=[
+            (base_scenario, true),
+            (no_monitoring_scenario, true)
+        ],
+        scenario_alternatives=[
+            (base_scenario, base_alternative, nothing),
+            (no_monitoring_scenario, no_monitoring_alternative, nothing),
+            (no_monitoring_scenario, base_alternative, no_monitoring_alternative)
+        ]
     )
     if !isempty(err_log)
         @error join(err_log, "\n")
