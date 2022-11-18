@@ -204,7 +204,7 @@ function prune_network(
     end
     for (c, n) in I.indices(I.connection_capacity)        
         if I.connection_capacity(connection=c, node=n) == 0
-            push!(object_parameter_values, ("connection", c, "is_active", false))
+            push!(object_parameter_values, ("connection", c.name, "is_active", false))
         end
     end
 
