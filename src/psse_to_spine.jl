@@ -75,7 +75,7 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
             bus_code = psse_bus_name
         end
         voltage_level = Int(round(data["base_kv"], digits=0))
-        node_name[i] = name = join([bus_code, voltage_level, i], "_")
+        node_name[i] = name = join(["EL",bus_code, voltage_level, i], "_")
         push!(objects, ("node", name))
         push!(object_parameter_values, ("node", name, "voltage", data["base_kv"]))
         push!(object_parameter_values, ("node", name, "psse_bus_name", psse_bus_name))        
@@ -153,13 +153,6 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
                 push!(object_parameter_values, ("connection", name, "connection_monitored", false))
                 push!(object_parameter_values, ("connection", name, "connection_contingency", false))
             end            
-
-            append!(object_parameter_values_no_monitoring,
-                [
-                    ("connection", name, "connection_monitored", false, no_monitoring_alternative),
-                    ("connection", name, "connection_contingency", false, no_monitoring_alternative)
-                ]
-            )
 
             push!(relationship_parameter_values, ("connection__to_node", rel, "connection_capacity", rate_a))
             push!(relationship_parameter_values, ("connection__to_node", rel, "connection_emergency_capacity", rate_c))
@@ -260,30 +253,7 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
     )
     if !isempty(err_log)
         @error join(err_log, "\n")
-    end
-
-    base_alternative = alternative
-    base_scenario = alternative
-    no_monitoring_scenario = no_monitoring_alternative
-
-    added, err_log = import_data(
-        db_url,
-        comment;        
-        object_parameter_values=object_parameter_values_no_monitoring,
-        alternatives=[no_monitoring_alternative],
-        scenarios=[
-            (base_scenario, true),
-          #  (no_monitoring_scenario, true)
-        ],
-        scenario_alternatives=[
-            (base_scenario, base_alternative, nothing),
-          #  (no_monitoring_scenario, no_monitoring_alternative, nothing),
-          #  (no_monitoring_scenario, base_alternative, no_monitoring_alternative)
-        ]
-    )
-    if !isempty(err_log)
-        @error join(err_log, "\n")
-    end
+    end    
 
     @info "data imported to $(db_url)"
 end
