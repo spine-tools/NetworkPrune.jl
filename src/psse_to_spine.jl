@@ -79,7 +79,8 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
         push!(objects, ("node", name))
         push!(object_parameter_values, ("node", name, "voltage", data["base_kv"]))
         push!(object_parameter_values, ("node", name, "psse_bus_name", psse_bus_name))        
-        push!(object_parameter_values, ("node", name, "bus_code", bus_code))
+        push!(object_parameter_values, ("node", name, "bus_code", bus_code))        
+
         if startswith(psse_bus_name, "starbus_")
             push!(object_parameter_values, ("node", name, "is_transformer_starbus", true))        
         end
@@ -117,7 +118,8 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
             br_r = data["br_r"]
             push!(object_parameter_values, ("connection", name, "connection_resistance", isempty(br_r) ? 0 : br_r))
             push!(object_parameter_values, ("connection", name, "connection_reactance", data["br_x"]))            
-            push!(object_parameter_values, ("connection", name, "connection_availability_factor", 1.0))
+            push!(object_parameter_values, ("connection", name, "connection_availability_factor", 1.0))            
+
             push!(
                 object_parameter_values,
                 ("connection", name, "connection_type", :connection_type_lossless_bidirectional)
@@ -125,6 +127,9 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
             rel = [name, to_bus_name]
             push!(relationships, ("connection__to_node", rel))
             rate_a = round(get(data, "rate_a", 0) * baseMVA, digits=2)
+
+            #rate_a == 0.0 && break
+
             if haskey(data, "rate_b")
                 rate_b = round(data["rate_b"] * baseMVA, digits=2)
             else
@@ -142,7 +147,7 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
             else
                 push!(object_parameter_values, ("connection", name, "connection_monitored", false))
                 push!(object_parameter_values, ("connection", name, "connection_contingency", false))
-            end
+            end            
 
             append!(object_parameter_values_no_monitoring,
                 [
@@ -153,12 +158,11 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
 
             push!(relationship_parameter_values, ("connection__to_node", rel, "connection_capacity", rate_a))
             push!(relationship_parameter_values, ("connection__to_node", rel, "connection_emergency_capacity", rate_c))
+
             rel = [name, from_bus_name]
             push!(relationships, ("connection__from_node", rel))
             push!(relationship_parameter_values, ("connection__from_node", rel, "connection_capacity", rate_a))
-            push!(
-                relationship_parameter_values, ("connection__from_node", rel, "connection_emergency_capacity", rate_c)
-            )
+            push!(relationship_parameter_values, ("connection__from_node", rel, "connection_emergency_capacity", rate_c))
         end
     end
     for dc in ("dcline" in skip ? () : ps_system["dcline"])
@@ -264,12 +268,12 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
         alternatives=[no_monitoring_alternative],
         scenarios=[
             (base_scenario, true),
-            (no_monitoring_scenario, true)
+          #  (no_monitoring_scenario, true)
         ],
         scenario_alternatives=[
             (base_scenario, base_alternative, nothing),
-            (no_monitoring_scenario, no_monitoring_alternative, nothing),
-            (no_monitoring_scenario, base_alternative, no_monitoring_alternative)
+          #  (no_monitoring_scenario, no_monitoring_alternative, nothing),
+          #  (no_monitoring_scenario, base_alternative, no_monitoring_alternative)
         ]
     )
     if !isempty(err_log)

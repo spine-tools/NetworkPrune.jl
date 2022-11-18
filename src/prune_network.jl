@@ -202,6 +202,12 @@ function prune_network(
             push!(relationship_parameter_values,("unit__to_node", rel, "unit_capacity", new_gen))
         end
     end
+    for (c, n) in I.indices(I.connection_capacity)        
+        if I.connection_capacity(connection=c, node=n) == 0
+            push!(object_parameter_values, ("connection", c, "is_active", false))
+        end
+    end
+
     all_data = run_request(db_url, "export_data")
     run_request(prunned_db_url, "import_data", (all_data, ""))
     object_parameter_values = [(opv..., alternative) for opv in object_parameter_values]
