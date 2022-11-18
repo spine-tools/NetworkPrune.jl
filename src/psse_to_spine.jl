@@ -128,18 +128,23 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
             push!(relationships, ("connection__to_node", rel))
             rate_a = round(get(data, "rate_a", 0) * baseMVA, digits=2)
 
-            #rate_a == 0.0 && break
+            (rate_a == 0.0) && (rate_a = 999.0)
 
             if haskey(data, "rate_b")
                 rate_b = round(data["rate_b"] * baseMVA, digits=2)
             else
                 rate_b = rate_a
             end
+
+            (rate_b == 0.0) && (rate_b = 999.0)
+
             if haskey(data, "rate_c")
                 rate_c = round(data["rate_c"] * baseMVA, digits=2)
             else
                 rate_c = rate_b
             end
+
+            (rate_c == 0.0) && (rate_c = 999.0)
 
             if rate_a < 998.0
                 push!(object_parameter_values, ("connection", name, "connection_monitored", true))
