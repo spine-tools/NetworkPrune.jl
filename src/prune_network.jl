@@ -225,10 +225,7 @@ function prune_network(
         k += 1
     end
     @info "Replacing starbusses by delta connections"    
-    _replace_starbusses(prunned_db_url; alternative=alternative)
-
-    @info "Writing no-monitoring alternative"    
-    _import_no_monitoring_alternative(I, prunned_db_url)
+    _replace_starbusses(prunned_db_url; alternative=alternative)    
 
     @info "Writing node mapping"    
     path = joinpath(pwd(), node_mapping_file_name)
@@ -685,40 +682,4 @@ function write_ptdfs(I, ptdfs, net_inj_nodes)
         print(io, "\n")
     end
     close(io)
-end
-
-function _import_no_monitoring_alternative(I, db_url)
-    base_alternative = "Base"
-    base_scenario = "Base"
-    no_monitoring_scenario = "no_monitoring"
-    no_monitoring_alternative = "no_monitoring"
-
-    object_parameter_values = []
-    for c in I.connection()
-        append!(object_parameter_values,
-            [
-                ("connection", c.name, "connection_monitored", false, no_monitoring_alternative),
-                ("connection", c.name, "connection_contingency", false, no_monitoring_alternative)
-            ]
-        )
-    end
-
-    added, err_log = import_data(
-        db_url,
-        "network prune";
-        object_parameter_values=object_parameter_values,
-        alternatives=[no_monitoring_alternative],
-        scenarios=[
-            (base_scenario, true),
-            (no_monitoring_scenario, true)
-        ],
-        scenario_alternatives=[
-            (base_scenario, base_alternative, nothing),
-            (no_monitoring_scenario, no_monitoring_alternative, nothing),
-            (no_monitoring_scenario, base_alternative, no_monitoring_alternative)
-        ]
-    )
-    if !isempty(err_log)
-        @info join(err_log, "\n")
-    end
 end
