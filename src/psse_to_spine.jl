@@ -57,7 +57,7 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
     push!(object_parameter_values, ("commodity", commodity_name, "commodity_lodf_tolerance", 0.1))
     push!(object_parameter_values, ("commodity", commodity_name, "commodity_physics", "commodity_physics_ptdf"))
     push!(object_parameter_values, ("commodity", commodity_name, "commodity_ptdf_flow_tolerance", 0.1))
-    push!(object_parameter_values, ("commodity", commodity_name, "commodity_ptdf_threshold", 0.0001))
+    push!(object_parameter_values, ("commodity", commodity_name, "commodity_ptdf_threshold", 0.001))
     push!(object_parameter_values, ("commodity", commodity_name, "commodity_slack_penalty", 1000))
     baseMVA = ps_system["baseMVA"]
     areas = []
