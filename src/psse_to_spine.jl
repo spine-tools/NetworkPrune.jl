@@ -30,12 +30,21 @@ Base.readlines(io::FilteredIO) = filter!(io.flt, readlines(io.inner))
 
 Parse the psse raw file (`psse_path`) using PowerModels.jl
 and create a SpineOpt model at `db_url` using `nodes`, `units` and `connections`.
+
+Refer here for mapping info
+
+    https://github.com/NREL-SIIP/PowerSystems.jl/blob/cae0189a661670e5767528582a0693e75827d1a1/src/parsers/power_models_data.jl
+
+and
+
+    https://lanl-ansi.github.io/PowerModels.jl/stable/network-data/
+
 """
 function psse_to_spine(psse_path, db_url::String; skip=(), bus_codes=Dict(), alternative="Base")
     pm_data = open(psse_path) do io
         filtered_io = FilteredIO(io, line -> !startswith(line, "@!") && !isempty(strip(line)))
         PowerModels.parse_psse(filtered_io)
-    end
+    end    
     psse_to_spine(pm_data, db_url; skip=skip, bus_codes=bus_codes, alternative=alternative)
 end
 function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(), alternative="Base", no_monitoring_alternative="no-monitoring")
@@ -146,7 +155,12 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
 
             (rate_c == 0.0) && (rate_c = 999.0)
 
-            if rate_a < 998.0
+            ratings = [rate_a, rate_b, rate_c]
+            ratings = sort(ratings)
+            normal_rating = ratings[1]
+            emergency_rating = ratings[3]            
+
+            if normal_rating < 998.0
                 push!(object_parameter_values, ("connection", name, "connection_monitored", true))
                 push!(object_parameter_values, ("connection", name, "connection_contingency", true))
             else
@@ -154,13 +168,13 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
                 push!(object_parameter_values, ("connection", name, "connection_contingency", false))
             end            
 
-            push!(relationship_parameter_values, ("connection__to_node", rel, "connection_capacity", rate_a))
-            push!(relationship_parameter_values, ("connection__to_node", rel, "connection_emergency_capacity", rate_c))
+            push!(relationship_parameter_values, ("connection__to_node", rel, "connection_capacity", normal_rating))
+            push!(relationship_parameter_values, ("connection__to_node", rel, "connection_emergency_capacity", emergency_rating))
 
             rel = [name, from_bus_name]
             push!(relationships, ("connection__from_node", rel))
-            push!(relationship_parameter_values, ("connection__from_node", rel, "connection_capacity", rate_a))
-            push!(relationship_parameter_values, ("connection__from_node", rel, "connection_emergency_capacity", rate_c))
+            push!(relationship_parameter_values, ("connection__from_node", rel, "connection_capacity", normal_rating))
+            push!(relationship_parameter_values, ("connection__from_node", rel, "connection_emergency_capacity", emergency_rating))
         end
     end
     for dc in ("dcline" in skip ? () : ps_system["dcline"])

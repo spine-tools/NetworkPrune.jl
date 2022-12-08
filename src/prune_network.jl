@@ -361,6 +361,7 @@ function _replace_starbusses(prunned_db_url; alternative="Base")
     objs = []
     rels = []
     opvs = []
+    rpvs = []
     for n in P.node(is_transformer_starbus=true)
         comm in P.node__commodity(node=n) || continue
         conns = vcat(P.connection__from_node(node=n), P.connection__to_node(node=n))
@@ -391,15 +392,24 @@ function _replace_starbusses(prunned_db_url; alternative="Base")
             conn_name = join(conn_name_parts, "__")
             r = sum(P.connection_resistance(connection=conn) for conn in conns)
             x = sum(P.connection_reactance(connection=conn) for conn in conns)
+            normal_rating = minimum(P.connection_capacity(connection=conn, node=n) for conn in conns for (conn, n) in P.indices(P.connection_capacity; connection=conn))
+            emergency_rating = minimum(P.connection_emergency_capacity(connection=conn, node=n) for conn in conns for (conn, n) in P.indices(P.connection_emergency_capacity; connection=conn))
             push!(objs, ("connection", conn_name))
             push!(opvs, ("connection", conn_name, "connection_resistance", r, alternative))
             push!(opvs, ("connection", conn_name, "connection_reactance", x, alternative))
+            push!(rpvs, ("connection__from_node", (conn_name, n_from.name), "connection_capacity", normal_rating, alternative))
+            push!(rpvs, ("connection__to_node", (conn_name, n_to.name), "connection_capacity", normal_rating, alternative))
+            push!(rpvs, ("connection__from_node", (conn_name, n_from.name), "connection_emergency_capacity", emergency_rating, alternative))
+            push!(rpvs, ("connection__to_node", (conn_name, n_to.name), "connection_emergency_capacity", emergency_rating, alternative))
             push!(rels, ("connection__from_node", (conn_name, n_from.name)))
             push!(rels, ("connection__to_node", (conn_name, n_to.name)))
         elseif length(conns) == 3
             starbusses_with_three_connections += 1
             total_r = sum(P.connection_resistance(connection=conn) for conn in conns)
             total_x = sum(P.connection_reactance(connection=conn) for conn in conns)
+
+            normal_rating = minimum(P.connection_capacity(connection=conn, node=n) for conn in conns for (conn, n) in P.indices(P.connection_capacity; connection=conn))
+            emergency_rating = minimum(P.connection_emergency_capacity(connection=conn, node=n) for conn in conns for (conn, n) in P.indices(P.connection_emergency_capacity; connection=conn))
             for conn in conns
                 n_from, n_to = [node_per_conn[other_conn] for other_conn in conns if other_conn != conn]
                 ckt = split(string(conn.name), "__")[end]  # Circuit nb is the last part of the name
@@ -410,6 +420,10 @@ function _replace_starbusses(prunned_db_url; alternative="Base")
                 push!(objs, ("connection", conn_name))
                 push!(opvs, ("connection", conn_name, "connection_resistance", r, alternative))
                 push!(opvs, ("connection", conn_name, "connection_reactance", x, alternative))
+                push!(rpvs, ("connection__from_node", (conn_name, n_from.name), "connection_capacity", normal_rating, alternative))
+                push!(rpvs, ("connection__to_node", (conn_name, n_to.name), "connection_capacity", normal_rating, alternative))
+                push!(rpvs, ("connection__from_node", (conn_name, n_from.name), "connection_emergency_capacity", emergency_rating, alternative))
+                push!(rpvs, ("connection__to_node", (conn_name, n_to.name), "connection_emergency_capacity", emergency_rating, alternative))
                 push!(rels, ("connection__from_node", (conn_name, n_from.name)))
                 push!(rels, ("connection__to_node", (conn_name, n_to.name)))
             end
@@ -429,7 +443,7 @@ function _replace_starbusses(prunned_db_url; alternative="Base")
         return
     end
     data_to_import = Dict(
-        :objects => objs, :relationships => rels, :object_parameter_values => opvs, :alternatives => [alternative]
+        :objects => objs, :relationships => rels, :object_parameter_values => opvs, :relationship_parameter_values => rpvs, :alternatives => [alternative]
     )
     comment = "Network pruning: replace starbusses by delta connections"
     _prune_and_import(prunned_db_url, to_prune_object_keys, data_to_import, comment)
