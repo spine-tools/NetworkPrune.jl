@@ -40,14 +40,14 @@ and
     https://lanl-ansi.github.io/PowerModels.jl/stable/network-data/
 
 """
-function psse_to_spine(psse_path, db_url::String; skip=(), bus_codes=Dict(), alternative="Base")
+function psse_to_spine(psse_path, db_url::String; skip=(), bus_codes=Dict(), alternative="Base", dont_trim_bus_codes=[])
     pm_data = open(psse_path) do io
         filtered_io = FilteredIO(io, line -> !startswith(line, "@!") && !isempty(strip(line)))
         PowerModels.parse_psse(filtered_io)
     end    
-    psse_to_spine(pm_data, db_url; skip=skip, bus_codes=bus_codes, alternative=alternative)
+    psse_to_spine(pm_data, db_url; skip=skip, bus_codes=bus_codes, alternative=alternative, dont_trim_bus_codes=dont_trim_bus_codes)
 end
-function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(), alternative="Base", no_monitoring_alternative="no-monitoring")
+function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(), alternative="Base", no_monitoring_alternative="no-monitoring", dont_trim_bus_codes=[])    
     objects = []
     object_groups = []
     relationships = []
@@ -59,7 +59,8 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
         ("node", "psse_bus_name"),
         ("node", "bus_code"),
         ("node", "voltage"),
-        ("node", "is_transformer_starbus")
+        ("node", "is_transformer_starbus"),
+        ("node", "dont_trim")
     ]
     commodity_name = "elec"
     push!(objects, ["commodity", commodity_name])
@@ -87,7 +88,7 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
         node_name[i] = name = join(["EL",bus_code, voltage_level, i], "_")
         push!(objects, ("node", name))
         push!(object_parameter_values, ("node", name, "voltage", data["base_kv"]))
-        push!(object_parameter_values, ("node", name, "psse_bus_name", psse_bus_name))        
+        push!(object_parameter_values, ("node", name, "psse_bus_name", psse_bus_name))
         push!(object_parameter_values, ("node", name, "bus_code", bus_code))        
 
         if startswith(psse_bus_name, "starbus_")
@@ -110,6 +111,12 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
         end        
         push!(object_groups, ["node", zone_name, name])
         push!(relationships, ("node__commodity", [name, "elec"]))
+        
+        if i in dont_trim_bus_codes
+            push!(object_parameter_values, ("node", name, "dont_trim", true))
+        end
+
+
     end
     for b in ("branch" in skip ? () : ps_system["branch"])
         data = b[2]

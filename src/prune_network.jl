@@ -219,9 +219,12 @@ function prune_network(
     _prune_and_import(prunned_db_url, to_prune_object_keys, data_to_import, comment)
     @info "Network pruned successfully" nodes_pruned connections_pruned units_moved units_distributed demands_moved demands_distributed
     k = 1
+
+    dont_trim_nodes = [n for n in I.node(dont_trim=true)]    
+
     while true
         @info "Trimming tails - pass $k"
-        trim_tails(prunned_db_url, node__new_nodes; alternative=alternative) || break
+        trim_tails(prunned_db_url, node__new_nodes; alternative=alternative, dont_trim_nodes=dont_trim_nodes) || break
         k += 1
     end
     @info "Replacing starbusses by delta connections"    
@@ -261,7 +264,7 @@ If a node is connected to only one other node:
     - If the reactance is lower or equal than 0.0001, then move the generation and delete the node and connection.
     - If the reactance is greater than 0.0001, then do nothing
 """
-function trim_tails(prunned_db_url::String, node__new_nodes; alternative="Base")
+function trim_tails(prunned_db_url::String, node__new_nodes; alternative="Base", dont_trim_nodes=[])
     P = Module()
     @eval P using SpineInterface
     using_spinedb(prunned_db_url, P)
@@ -294,9 +297,9 @@ function trim_tails(prunned_db_url::String, node__new_nodes; alternative="Base")
                 for other_conn in connection__node(node=n_to)
                 if other_conn != conn
             ]
-            if isempty(n_from_other_conns)
+            if isempty(n_from_other_conns) && !(n_from in dont_trim_nodes)
                 push!(tail_conn_next_tuples, (n_from, conn, n_to))
-            elseif isempty(n_to_other_conns)
+            elseif isempty(n_to_other_conns) && !(n_to in dont_trim_nodes)
                 push!(tail_conn_next_tuples, (n_to, conn, n_from))
             end
         end
