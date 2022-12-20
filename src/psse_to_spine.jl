@@ -123,7 +123,12 @@ function psse_to_spine(ps_system::Dict, db_url::String; skip=(), bus_codes=Dict(
         if data["br_status"] in (0, 1)
             from_bus_name = node_name[data["f_bus"]]
             to_bus_name =  node_name[data["t_bus"]]
-            ckt = rstrip(string(data["source_id"][4]))
+            if data["transformer"]
+                ckt = rstrip(string(data["source_id"][5]))
+            else
+                ckt = rstrip(string(data["source_id"][4]))
+            end
+            
             name_parts = [from_bus_name, to_bus_name, ckt]
             if data["transformer"]
                 pushfirst!(name_parts, "TX")

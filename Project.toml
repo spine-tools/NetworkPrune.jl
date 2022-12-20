@@ -6,6 +6,8 @@ version = "0.1.0"
 [deps]
 PowerModels = "c36e90e8-916a-50a6-bd94-075b64ef4655"
 PowerSystems = "bcd98974-b02a-5e2f-9ee0-a103f5c450dd"
+SpineInterface = "0cda1612-498a-11e9-3c92-77fa82595a4f"
+SpineOpt = "0d8fc150-4032-4b6e-9540-20efcb304861"
 
 [compat]
 julia = "1"
