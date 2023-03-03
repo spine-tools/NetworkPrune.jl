@@ -22,7 +22,7 @@ function prune_network(
 )
     I = Module()
     @eval I using SpineInterface
-    using_spinedb(db_url, I)    
+    using_spinedb(db_url, I)
 
     comm = first(
         c for c in I.commodity()
@@ -218,10 +218,8 @@ function prune_network(
     comment = "Network pruning: demand and generation shifts"
     _prune_and_import(prunned_db_url, to_prune_object_keys, data_to_import, comment)
     @info "Network pruned successfully" nodes_pruned connections_pruned units_moved units_distributed demands_moved demands_distributed
+    dont_trim_nodes = I.node(dont_trim=true)
     k = 1
-
-    dont_trim_nodes = [n for n in I.node(dont_trim=true)]    
-
     while true
         @info "Trimming tails - pass $k"
         trim_tails(prunned_db_url, node__new_nodes; alternative=alternative, dont_trim_nodes=dont_trim_nodes) || break
@@ -472,7 +470,10 @@ function write_node__new_nodes(I, node__new_nodes, path)
     io = open(path, "w")
     print(io, "node,V,total_gens,total_generation,total_demand,")
     print(io, "node1,V1,ptdf1,node2,V2,ptdf2,node3,V3,ptdf3,node4,V4,ptdf4,node5,V5,ptdf5\n")
+
     for (n, new_nodes) in node__new_nodes
+        n = I.node(n.name)
+        new_nodes = [(I.node(n2.name), ptdf) for (n2, ptdf) in new_nodes]
         total_generators = 0
         total_generation = 0
         total_demand = 0
