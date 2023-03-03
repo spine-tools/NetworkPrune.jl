@@ -23,6 +23,7 @@ using SpineOpt
 using SpineInterface
 using PowerSystems
 using PowerModels
+using PowerSimulations
 
 export psse_to_spine
 export prune_network

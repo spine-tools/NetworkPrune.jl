@@ -619,7 +619,7 @@ function calculate_ptdfs(I, comm)
             end
         end
     end
-    ps_ptdf = PowerSystems.PTDF(ps_lines, ps_busses)
+    ps_ptdf = PowerSimulations.PTDF(ps_lines, ps_busses)
     ptdf = Dict{Tuple{Object,Object},Float64}()
     for n in I.node__commodity(commodity=comm)
         for conn in I.connection()
