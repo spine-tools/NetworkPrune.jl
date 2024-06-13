@@ -38,7 +38,8 @@ function prune_network(
     @info "Calculating ptdfs"
     ptdf_conn_n = calculate_ptdfs(I, comm)
     lodf_con_mon, con__mon = if I.commodity_physics(commodity=comm) == :commodity_physics_lodf
-        @info "Calculating lodfs" calculate_lodfs(I, ptdf_conn_n)
+        @info "Calculating lodfs"
+        calculate_lodfs(I, ptdf_conn_n)
     else
         Dict(), []
     end
@@ -518,7 +519,7 @@ function islands(I, comm)
         if !visited_d[n]
             island = island + 1
             island_node[island] = Object[]
-            visit(I, n, island, visited_d, island_node)
+            visit(I, comm, n, island, visited_d, island_node)
         end
     end
     return island, island_node
@@ -529,20 +530,20 @@ end
 
 Function called recursively to visit nodes in the network to determine number of islands
 """
-function visit(I, n, island, visited_d, island_node)
+function visit(I, comm, n, island, visited_d, island_node)
     visited_d[n] = true
     push!(island_node[island], n)
     for conn in I.connection__from_node(node=n)
         for n2 in I.connection__to_node(connection=conn)
-            if !visited_d[n2]
-                visit(I, n2, island, visited_d, island_node)
+            if comm in I.node__commodity(node=n2) && !visited_d[n2]
+                visit(I, comm, n2, island, visited_d, island_node)
             end
         end
     end
     for conn in I.connection__to_node(node=n)
         for n2 in I.connection__from_node(connection=conn)
-            if !visited_d[n2]
-                visit(I, n2, island, visited_d, island_node)
+            if comm in I.node__commodity(node=n2) && !visited_d[n2]
+                visit(I, comm, n2, island, visited_d, island_node)
             end
         end
     end
@@ -600,7 +601,7 @@ function calculate_ptdfs(I, comm)
     for conn in I.connection()
         for n_from in I.connection__from_node(connection=conn)
             for n_to in I.connection__to_node(connection=conn)
-                if comm in vcat(I.node__commodity(node=n_from), I.node__commodity(node=n_to))
+                if n_from != n_to && comm in I.node__commodity(node=n_from) && comm in I.node__commodity(node=n_to)
                     ps_arc = Arc(node_ps_bus[n_from], node_ps_bus[n_to])
                     new_line = Line(;
                         name = string(conn),
@@ -624,7 +625,12 @@ function calculate_ptdfs(I, comm)
     ptdf = Dict{Tuple{Object,Object},Float64}()
     for n in I.node__commodity(commodity=comm)
         for conn in I.connection()
-            ptdf[conn, n] = ps_ptdf[string(conn), node_ps_bus[n].number]
+            try
+                ptdf[conn, n] = ps_ptdf[string(conn), node_ps_bus[n].number]
+            catch err
+                err isa KeyError && continue
+                rethrow()
+            end
         end
     end
     # buildlodf needs to be updated to account for cases
