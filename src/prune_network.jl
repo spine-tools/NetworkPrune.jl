@@ -17,6 +17,8 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #############################################################################
 
+GenTypes=["wind","solar","hydro","other"]
+
 function prune_network(
     db_url::String, prunned_db_url::String; alternative="Base", node_mapping_file_name="node_mapping.csv"
 )
@@ -111,6 +113,8 @@ function prune_network(
     new_demand_dict = Dict{Object,Float64}()
     new_gen_dict = Dict{Object,Float64}()
     gens_to_move = Dict{Object,Object}()
+    
+    
     for (n, new_nodes) in node__new_nodes
         # if the reference node is pruned, set the first mapped node as the reference node
         if I.node_opf_type(node=n) == :node_opf_type_reference
@@ -135,18 +139,8 @@ function prune_network(
                     new_demand_dict[n2] = demand_to_shift
                 end
                 demands_moved += 1
-            end
-            for u in I.unit__to_node(node=n)
-                gens_to_move[u] = n2
-                units_moved += 1
-            end
-        else
-            gen_to_shift = 0
-            for u in I.unit__to_node(node=n)
-                gen_to_shift = gen_to_shift + I.unit_capacity(unit=u, node=n)
-                push!(to_prune_object_keys, (u.class_name, u.name))                    
-                units_distributed += 1
-            end
+            end           
+        else           
             for (n2, ptdf) in new_nodes
                 ptdf = abs(ptdf)
                 if demand_to_shift > 0
@@ -156,15 +150,41 @@ function prune_network(
                         new_demand_dict[n2] = demand_to_shift * ptdf
                     end
                     demands_distributed += 1
-                end
-                if haskey(new_gen_dict, n2)
-                    new_gen_dict[n2] = new_gen_dict[n2] + gen_to_shift * ptdf
-                else
-                    new_gen_dict[n2] = gen_to_shift * ptdf
-                end
+                end                
             end
         end
     end
+
+    for (n, new_nodes) in node__new_nodes        
+        if size(new_nodes, 1) == 1  # only one connected higher voltage node, move all the demand here            
+            for u in I.unit__to_node(node=n)
+                gens_to_move[u] = n2
+                units_moved += 1
+            end
+        else
+            for gentype in GenTypes
+                gen_to_shift = 0
+                for u in I.unit__to_node(node=n)                    
+                    gottype = get_gen_type(string(u.name))
+                    if gottype == gentype
+                        gen_to_shift = gen_to_shift + I.unit_capacity(unit=u, node=n)
+                        push!(to_prune_object_keys, (u.class_name, u.name))                    
+                        units_distributed += 1
+                    end
+                end
+                for (n2, ptdf) in new_nodes
+                    ngd = get(new_gen_dict, n2, Dict())
+                    ptdf = abs(ptdf)                    
+                    if haskey(ngd, gentype)
+                        new_gen_dict[n2][gentype] = new_gen_dict[n2] + gen_to_shift * ptdf
+                    else
+                        new_gen_dict[n2][gentype] = gen_to_shift * ptdf
+                    end
+                end
+            end
+        end        
+    end
+
     # Update demand parameter of higher voltage nodes to add demand of pruned nodes
     for (n, new_demand) in new_demand_dict
         if I.demand(node=n) == nothing
@@ -191,17 +211,19 @@ function prune_network(
         end
     end
     for (n, new_gen) in new_gen_dict
-        if new_gen > 0
-            unit_name = string("U_DIST_", n)
-            push!(objects, ("unit", unit_name))
-            push!(object_parameter_values, ("unit", unit_name, "number_of_units", 1))
-            push!(
-                object_parameter_values, ("unit", unit_name, "online_variable_type", "unit_online_variable_type_binary")
-            )
-            push!(object_parameter_values, ("unit", unit_name, "unit_availability_factor", 1))
-            rel = [unit_name, string(n)]
-            push!(relationships,("unit__to_node", rel))
-            push!(relationship_parameter_values,("unit__to_node", rel, "unit_capacity", new_gen))
+        for (gentype, capacity) in new_gen
+            if capacity > 0
+                unit_name = string(gentype*"_", n)
+                push!(objects, ("unit", unit_name))
+                push!(object_parameter_values, ("unit", unit_name, "number_of_units", 1))
+                push!(
+                    object_parameter_values, ("unit", unit_name, "online_variable_type", "unit_online_variable_type_binary")
+                )
+                push!(object_parameter_values, ("unit", unit_name, "unit_availability_factor", 1))
+                rel = [unit_name, string(n)]
+                push!(relationships,("unit__to_node", rel))
+                push!(relationship_parameter_values,("unit__to_node", rel, "unit_capacity", capacity)))
+            end
         end
     end
 
@@ -706,4 +728,14 @@ function write_ptdfs(I, ptdfs, net_inj_nodes)
         print(io, "\n")
     end
     close(io)
+end
+
+function get_gen_type(unit_name)
+    for t = in GenTypes
+        if occursin(lowercase(t), lowercase(unit_name))
+            t
+            break
+        end
+    end
+    "other"
 end
