@@ -168,7 +168,7 @@ function prune_network(
                     gottype = get_gen_type(string(u.name))
                     if gottype == gentype
                         gen_to_shift = gen_to_shift + I.unit_capacity(unit=u, node=n)
-                        push!(to_prune_object_keys, (u.class_name, u.name))                    
+                        push!(to_prune_object_keys, (u.class_name, u.name))
                         units_distributed += 1
                     end
                 end
@@ -176,7 +176,7 @@ function prune_network(
                     ngd = get(new_gen_dict, n2, Dict())
                     ptdf = abs(ptdf)                    
                     if haskey(ngd, gentype)
-                        new_gen_dict[n2][gentype] = new_gen_dict[n2] + gen_to_shift * ptdf
+                        new_gen_dict[n2][gentype] = new_gen_dict[n2][gentype] + gen_to_shift * ptdf
                     else
                         new_gen_dict[n2][gentype] = gen_to_shift * ptdf
                     end
