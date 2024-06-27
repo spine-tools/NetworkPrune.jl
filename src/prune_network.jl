@@ -17,7 +17,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #############################################################################
 
-GenTypes=["wind","solar","hydro","other"]
+GenTypes=["wind-on", "solar", "hydro", "other"]
 
 function prune_network(
     db_url::String, prunned_db_url::String; alternative="Base", node_mapping_file_name="node_mapping.csv"
@@ -84,7 +84,9 @@ function prune_network(
     units_moved = 0
     units_distributed = 0
     demands_moved = 0
-    demands_distributed = 0    
+    demands_distributed = 0
+    fractional_demands_moved = 0
+    fractional_demands_distributed = 0
     for n in comm_nodes
         I.is_transformer_starbus(node=n) == true && continue
         for ng in groups(n)            
@@ -111,7 +113,8 @@ function prune_network(
         end
     end    
     new_demand_dict = Dict{Object,Float64}()
-    new_gen_dict = Dict{Object,Float64}()
+    new_fractional_demand_dict = Dict{Object,Float64}()
+    new_gen_dict = Dict{Object,Dict{String,Float64}}()
     gens_to_move = Dict{Object,Object}()
     
     
@@ -130,6 +133,13 @@ function prune_network(
         else
             demand_to_shift = I.demand(node=n)
         end
+
+        if I.fractional_demand(node=n) == nothing
+            fractional_demand_to_shift = 0
+        else
+            fractional_demand_to_shift = I.fractional_demand(node=n)
+        end
+
         if size(new_nodes, 1) == 1  # only one connected higher voltage node, move all the demand here
             n2, _ptdf = new_nodes[1]
             if demand_to_shift > 0
@@ -139,7 +149,15 @@ function prune_network(
                     new_demand_dict[n2] = demand_to_shift
                 end
                 demands_moved += 1
-            end           
+            end
+            if fractional_demand_to_shift > 0
+                if haskey(new_fractional_demand_dict, n2)
+                    new_fractional_demand_dict[n2] += fractional_demand_to_shift
+                else
+                    new_fractional_demand_dict[n2] = fractional_demand_to_shift
+                end
+                fractional_demands_moved += 1
+            end   
         else           
             for (n2, ptdf) in new_nodes
                 ptdf = abs(ptdf)
@@ -151,12 +169,22 @@ function prune_network(
                     end
                     demands_distributed += 1
                 end                
+                if fractional_demand_to_shift > 0
+                    if haskey(new_fractional_demand_dict, n2)
+                        new_fractional_demand_dict[n2] = new_fractional_demand_dict[n2] + fractional_demand_to_shift * ptdf
+                    else
+                        new_fractional_demand_dict[n2] = fractional_demand_to_shift * ptdf
+                    end
+                    fractional_demands_distributed += 1
+                end
             end
         end
     end
 
     for (n, new_nodes) in node__new_nodes        
-        if size(new_nodes, 1) == 1  # only one connected higher voltage node, move all the demand here            
+        # if size(new_nodes, 1) == 1  # only one connected higher voltage node, move all the demand here
+        if false # For now,  disable moving of units - distrute them all instead
+        
             for u in I.unit__to_node(node=n)
                 gens_to_move[u] = n2
                 units_moved += 1
@@ -165,7 +193,7 @@ function prune_network(
             for gentype in GenTypes
                 gen_to_shift = 0
                 for u in I.unit__to_node(node=n)                    
-                    gottype = get_gen_type(string(u.name))
+                    gottype = get_gen_type(string(u.name))                    
                     if gottype == gentype
                         gen_to_shift = gen_to_shift + I.unit_capacity(unit=u, node=n)
                         push!(to_prune_object_keys, (u.class_name, u.name))
@@ -173,9 +201,9 @@ function prune_network(
                     end
                 end
                 for (n2, ptdf) in new_nodes
-                    ngd = get(new_gen_dict, n2, Dict())
+                    (haskey(new_gen_dict, n2) == false) && (new_gen_dict[n2] = Dict())                    
                     ptdf = abs(ptdf)                    
-                    if haskey(ngd, gentype)
+                    if haskey(new_gen_dict[n2], gentype)
                         new_gen_dict[n2][gentype] = new_gen_dict[n2][gentype] + gen_to_shift * ptdf
                     else
                         new_gen_dict[n2][gentype] = gen_to_shift * ptdf
@@ -183,6 +211,19 @@ function prune_network(
                 end
             end
         end        
+    end
+
+    # Merge existing generation at node that matches our types
+
+    for n in keys(new_gen_dict)
+        for gentype in keys(new_gen_dict[n])
+            for u in I.unit__to_node(node=n)                    
+                if get_gen_type(string(u.name)) == gentype
+                    new_gen_dict[n][gentype] += I.unit_capacity(unit=u, node=n, _default=0)
+                    push!(to_prune_object_keys, (u.class_name, u.name))
+                end
+            end
+        end
     end
 
     # Update demand parameter of higher voltage nodes to add demand of pruned nodes
@@ -193,6 +234,14 @@ function prune_network(
             updated_demand = I.demand(node=n) + new_demand
         end
         push!(object_parameter_values, ("node", string(n), "demand", new_demand))
+    end
+    for (n, new_fractional_demand) in new_fractional_demand_dict
+        if I.fractional_demand(node=n) == nothing
+            updated_fractional_demand = new_fractional_demand
+        else
+            updated_fractional_demand = I.fractional_demand(node=n) + new_fractional_demand
+        end
+        push!(object_parameter_values, ("node", string(n), "fractional_demand", new_fractional_demand))
     end
     for (u, new_node) in gens_to_move
         rel = [string(u), string(new_node)]
@@ -222,7 +271,7 @@ function prune_network(
                 push!(object_parameter_values, ("unit", unit_name, "unit_availability_factor", 1))
                 rel = [unit_name, string(n)]
                 push!(relationships,("unit__to_node", rel))
-                push!(relationship_parameter_values,("unit__to_node", rel, "unit_capacity", capacity)))
+                push!(relationship_parameter_values,("unit__to_node", rel, "unit_capacity", capacity))
             end
         end
     end
@@ -643,7 +692,7 @@ function calculate_ptdfs(I, comm)
             end
         end
     end
-    ps_ptdf = PowerSimulations.PTDF(ps_lines, ps_busses)
+    ps_ptdf = PowerSystems.PTDF(ps_lines, ps_busses)
     ptdf = Dict{Tuple{Object,Object},Float64}()
     for n in I.node__commodity(commodity=comm)
         for conn in I.connection()
@@ -731,11 +780,8 @@ function write_ptdfs(I, ptdfs, net_inj_nodes)
 end
 
 function get_gen_type(unit_name)
-    for t = in GenTypes
-        if occursin(lowercase(t), lowercase(unit_name))
-            t
-            break
-        end
+    for t in GenTypes
+        occursin(lowercase(t), lowercase(unit_name)) && return t                    
     end
     "other"
 end
