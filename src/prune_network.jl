@@ -275,7 +275,7 @@ function prune_network(
             end
         end
     end
-
+    
     all_data = run_request(db_url, "export_data")
     run_request(prunned_db_url, "import_data", (all_data, ""))
     object_parameter_values = [(opv..., alternative) for opv in object_parameter_values]
