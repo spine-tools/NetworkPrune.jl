@@ -17,11 +17,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #############################################################################
 
-GenTypes=["wind-on", "solar", "hydro", "other"]
+GenTypes=["wind-on", "solar", "hydro"]
 
 function prune_network(
     db_url::String, prunned_db_url::String; alternative="Base", node_mapping_file_name="node_mapping.csv"
-)
+)    
     I = Module()
     @eval I using SpineInterface
     using_spinedb(db_url, I)
@@ -183,8 +183,7 @@ function prune_network(
 
     for (n, new_nodes) in node__new_nodes        
         # if size(new_nodes, 1) == 1  # only one connected higher voltage node, move all the demand here
-        if false # For now,  disable moving of units - distrute them all instead
-        
+        if false # For now,  disable moving of units - distrute them all instead        
             for u in I.unit__to_node(node=n)
                 gens_to_move[u] = n2
                 units_moved += 1
@@ -218,7 +217,8 @@ function prune_network(
     for n in keys(new_gen_dict)
         for gentype in keys(new_gen_dict[n])
             for u in I.unit__to_node(node=n)                    
-                if get_gen_type(string(u.name)) == gentype
+                gottype = get_gen_type(string(u.name))
+                if gottype == gentype && gottype != "other"
                     new_gen_dict[n][gentype] += I.unit_capacity(unit=u, node=n, _default=0)
                     push!(to_prune_object_keys, (u.class_name, u.name))
                 end
@@ -265,10 +265,10 @@ function prune_network(
                 unit_name = string(gentype*"_", n)
                 push!(objects, ("unit", unit_name))
                 push!(object_parameter_values, ("unit", unit_name, "number_of_units", 1))
-                push!(
-                    object_parameter_values, ("unit", unit_name, "online_variable_type", "unit_online_variable_type_binary")
-                )
-                push!(object_parameter_values, ("unit", unit_name, "unit_availability_factor", 1))
+                # push!(
+                #    object_parameter_values, ("unit", unit_name, "online_variable_type", "unit_online_variable_type_binary")
+                # )
+                # push!(object_parameter_values, ("unit", unit_name, "unit_availability_factor", 1))
                 rel = [unit_name, string(n)]
                 push!(relationships,("unit__to_node", rel))
                 push!(relationship_parameter_values,("unit__to_node", rel, "unit_capacity", capacity))
@@ -739,7 +739,7 @@ function calculate_lodfs(I, ptdf_conn_n)
                             else
                                 lodf_trial = -ptdf_conn_n[(conn_mon, n_from)]
                             end
-                            c = first(indices(commodity_lodf_tolerance))
+                            c = first(I.indices(I.commodity_lodf_tolerance))
                             tolerance = I.commodity_lodf_tolerance(commodity=c)
                             if abs(lodf_trial) > tolerance
                                 considered_contingencies = considered_contingencies + 1
