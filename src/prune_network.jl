@@ -17,7 +17,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #############################################################################
 
-GenTypes=["wind-on", "solar", "hydro"]
+GenTypes=["Wind-on", "Solar", "hydro"]
 
 function prune_network(
     db_url::String, prunned_db_url::String; alternative="Base", node_mapping_file_name="node_mapping.csv"
@@ -59,7 +59,7 @@ function prune_network(
         # for some reason, I was only mapping nodes with load or generation, but we want to map all nodes, right?
         min_v = 0
         for ng in groups(n)
-            if I.minimum_voltage(node=ng) != nothing
+            if I.minimum_voltage(node=ng) !== nothing
                 min_v = I.minimum_voltage(node=ng)
                 break
             end
@@ -75,9 +75,42 @@ function prune_network(
     for n in inj_nodes
         traversed = Dict(n2 => false for n2 in comm_nodes)
         min_voltages = (I.minimum_voltage(node=ng) for ng in groups(n))
-        min_v = first(v for v in min_voltages if v != nothing)
+        min_v = first(v for v in min_voltages if v !== nothing)
         traverse(I, n, n, traversed, node__new_nodes, min_v, ptdf_conn_n, 1)
     end
+
+    # there may be multiple paths to the destination node and we need to sum the ptdfs via these paths
+    for (n, new_nodes) in node__new_nodes
+        min_voltages = (I.minimum_voltage(node=ng) for ng in groups(n))
+        min_v = first(v for v in min_voltages if v !== nothing)        
+        for (i, (n2, ptdf)) in enumerate(new_nodes)            
+            remote_node_ptdf=Dict()
+            for conn in I.connection__from_node(node=n2)
+                for n_remote in I.connection__to_node(connection=conn)
+                    if n_remote in comm_nodes                    
+                        if I.voltage(node=n_remote) < min_v
+                            remote_node_ptdf[n_remote] = ptdf_conn_n[(conn, n)]
+                        end
+                    end
+                end
+            end
+            for conn in I.connection__to_node(node=n2)
+                for n_remote in I.connection__from_node(connection=conn)
+                    if n_remote in comm_nodes
+                        if I.voltage(node=n_remote) < min_v                            
+                            remote_node_ptdf[n_remote] = ptdf_conn_n[(conn, n)]
+                        end
+                    end
+                end
+            end
+            ptdf_total = 0
+            for (remote_node, ptdf) in remote_node_ptdf
+                ptdf_total += ptdf
+            end
+            node__new_nodes[n][i] = (n2, ptdf_total)
+        end
+    end
+
     to_prune_object_keys = []
     nodes_pruned = 0
     connections_pruned = 0
@@ -87,10 +120,13 @@ function prune_network(
     demands_distributed = 0
     fractional_demands_moved = 0
     fractional_demands_distributed = 0
+    fractional_demand_shifted = 0
+    destination_fractional_demand = 0
+
     for n in comm_nodes
         I.is_transformer_starbus(node=n) == true && continue
         for ng in groups(n)            
-            if I.minimum_voltage(node=ng) != nothing
+            if I.minimum_voltage(node=ng) !== nothing
                 min_v = I.minimum_voltage(node=ng)
                 if I.voltage(node=n) < min_v
                     push!(to_prune_object_keys, (n.class_name, n.name))                    
@@ -128,17 +164,19 @@ function prune_network(
                 ("node", string(new_ref_node), "node_opf_type", :node_opf_type_reference, alternative)
             )
         end
-        if I.demand(node=n) == nothing
+        if I.demand(node=n) === nothing
             demand_to_shift = 0
         else
             demand_to_shift = I.demand(node=n)
         end
 
-        if I.fractional_demand(node=n) == nothing
+        if I.fractional_demand(node=n) === nothing
             fractional_demand_to_shift = 0
         else
             fractional_demand_to_shift = I.fractional_demand(node=n)
         end
+
+        fractional_demand_shifted += fractional_demand_to_shift
 
         if size(new_nodes, 1) == 1  # only one connected higher voltage node, move all the demand here
             n2, _ptdf = new_nodes[1]
@@ -163,7 +201,7 @@ function prune_network(
                 ptdf = abs(ptdf)
                 if demand_to_shift > 0
                     if haskey(new_demand_dict, n2)
-                        new_demand_dict[n2] = new_demand_dict[n2] + demand_to_shift * ptdf
+                        new_demand_dict[n2] += demand_to_shift * ptdf
                     else
                         new_demand_dict[n2] = demand_to_shift * ptdf
                     end
@@ -171,11 +209,12 @@ function prune_network(
                 end                
                 if fractional_demand_to_shift > 0
                     if haskey(new_fractional_demand_dict, n2)
-                        new_fractional_demand_dict[n2] = new_fractional_demand_dict[n2] + fractional_demand_to_shift * ptdf
+                        new_fractional_demand_dict[n2] += fractional_demand_to_shift * ptdf
                     else
                         new_fractional_demand_dict[n2] = fractional_demand_to_shift * ptdf
                     end
                     fractional_demands_distributed += 1
+                    destination_fractional_demand += fractional_demand_to_shift * ptdf
                 end
             end
         end
@@ -220,7 +259,7 @@ function prune_network(
                 gottype = get_gen_type(string(u.name))
                 if gottype == gentype && gottype != "other"
                     new_gen_dict[n][gentype] += I.unit_capacity(unit=u, node=n, _default=0)
-                    push!(to_prune_object_keys, (u.class_name, u.name))
+                    # push!(to_prune_object_keys, (u.class_name, u.name))
                 end
             end
         end
@@ -228,20 +267,20 @@ function prune_network(
 
     # Update demand parameter of higher voltage nodes to add demand of pruned nodes
     for (n, new_demand) in new_demand_dict
-        if I.demand(node=n) == nothing
+        if I.demand(node=n) === nothing
             updated_demand = new_demand
         else
             updated_demand = I.demand(node=n) + new_demand
         end
-        push!(object_parameter_values, ("node", string(n), "demand", new_demand))
+        push!(object_parameter_values, ("node", string(n), "demand", updated_demand))
     end
     for (n, new_fractional_demand) in new_fractional_demand_dict
-        if I.fractional_demand(node=n) == nothing
+        if I.fractional_demand(node=n) === nothing
             updated_fractional_demand = new_fractional_demand
         else
             updated_fractional_demand = I.fractional_demand(node=n) + new_fractional_demand
         end
-        push!(object_parameter_values, ("node", string(n), "fractional_demand", new_fractional_demand))
+        push!(object_parameter_values, ("node", string(n), "fractional_demand", updated_fractional_demand))
     end
     for (u, new_node) in gens_to_move
         rel = [string(u), string(new_node)]
@@ -251,7 +290,7 @@ function prune_network(
                 relationship_parameter_values,
                 ("unit__to_node", rel, "unit_capacity", I.unit_capacity(unit=u, node=old_node))
             )
-            if I.minimum_operating_point(unit=u, node=old_node) != nothing
+            if I.minimum_operating_point(unit=u, node=old_node) !== nothing
                 push!(
                     relationship_parameter_values,
                     ("unit__to_node", rel, "minimum_operating_point", I.minimum_operating_point(unit=u, node=old_node))
@@ -262,7 +301,7 @@ function prune_network(
     for (n, new_gen) in new_gen_dict
         for (gentype, capacity) in new_gen
             if capacity > 0
-                unit_name = string(gentype*"_", n)
+                unit_name = gentype*"_"*replace(string(n),"EL_" => "")
                 push!(objects, ("unit", unit_name))
                 push!(object_parameter_values, ("unit", unit_name, "number_of_units", 1))
                 # push!(
@@ -289,7 +328,7 @@ function prune_network(
     )
     comment = "Network pruning: demand and generation shifts"
     _prune_and_import(prunned_db_url, to_prune_object_keys, data_to_import, comment)
-    @info "Network pruned successfully" nodes_pruned connections_pruned units_moved units_distributed demands_moved demands_distributed
+    @info "Network pruned successfully" nodes_pruned connections_pruned units_moved units_distributed demands_moved demands_distributed fractional_demand_shifted destination_fractional_demand
     dont_trim_nodes = I.node(dont_trim=true)
     k = 1
     while true
@@ -378,8 +417,10 @@ function trim_tails(prunned_db_url::String, node__new_nodes; alternative="Base",
     rels = []
     opvs = []
     new_demands = Dict()
+    new_fractional_demands = Dict()
     for (tail_node, conn, next_node) in tail_conn_next_tuples
         tail_demand = P.demand(node=tail_node)
+        tail_fractional_demand = P.fractional_demand(node=tail_node)
         units = P.unit__to_node(node=tail_node)
         react = P.connection_reactance(connection=conn)
         if isempty(units) || react <= 0.0001
@@ -391,6 +432,10 @@ function trim_tails(prunned_db_url::String, node__new_nodes; alternative="Base",
             # move any tail demand to next
             if !isnothing(tail_demand) && !iszero(tail_demand)
                 push!(get!(new_demands, next_node, []), tail_demand)
+            end
+            # move any fractional_demand to next
+            if !isnothing(tail_fractional_demand) && !iszero(tail_fractional_demand)
+                push!(get!(new_fractional_demands, next_node, []), tail_fractional_demand)
             end
             # move any units to next
             if !isempty(units)
@@ -404,6 +449,14 @@ function trim_tails(prunned_db_url::String, node__new_nodes; alternative="Base",
         new_demand += sum(tail_demands)
         push!(opvs, ("node", next_node.name, "demand", unparse_db_value(new_demand), alternative))
     end
+
+    for (next_node, tail_fractional_demands) in new_fractional_demands
+        next_fractional_demand = P.fractional_demand(node=next_node)
+        new_fractional_demand = isnothing(next_fractional_demand) ? 0 : next_fractional_demand
+        new_fractional_demand += sum(tail_fractional_demands)
+        push!(opvs, ("node", next_node.name, "fractional_demand", unparse_db_value(new_fractional_demand), alternative))
+    end
+
     to_prune_object_keys = [(class_name, x.name) for (class_name, objects) in to_remove for x in objects]
     if isempty(to_prune_object_keys)
         @info "No tails left to trim"
