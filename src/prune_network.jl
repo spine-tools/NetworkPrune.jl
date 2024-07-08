@@ -52,6 +52,7 @@ function prune_network(
     relationship_parameter_values = []
     inj_nodes = []
     comm_nodes = []
+    retained_nodes = []
     for n in I.node__commodity(commodity=comm)
         push!(comm_nodes, n)
         I.is_transformer_starbus(node=n) == true && continue
@@ -66,6 +67,8 @@ function prune_network(
         end
         if I.voltage(node=n) < min_v
             push!(inj_nodes, n)
+        else
+            push!(retained_nodes, n)
         end
     end
     # @info "Writing ptdf diagnostic file"
@@ -85,11 +88,13 @@ function prune_network(
         min_v = first(v for v in min_voltages if v !== nothing)        
         for (i, (n2, ptdf)) in enumerate(new_nodes)            
             remote_node_ptdf=Dict()
+            ptdf_total = 0
             for conn in I.connection__from_node(node=n2)
                 for n_remote in I.connection__to_node(connection=conn)
                     if n_remote in comm_nodes                    
                         if I.voltage(node=n_remote) < min_v
                             remote_node_ptdf[n_remote] = ptdf_conn_n[(conn, n)]
+                            ptdf_total += -ptdf_conn_n[(conn, n)]
                         end
                     end
                 end
@@ -99,14 +104,15 @@ function prune_network(
                     if n_remote in comm_nodes
                         if I.voltage(node=n_remote) < min_v                            
                             remote_node_ptdf[n_remote] = ptdf_conn_n[(conn, n)]
+                            ptdf_total += ptdf_conn_n[(conn, n)]
                         end
                     end
                 end
             end
-            ptdf_total = 0
-            for (remote_node, ptdf) in remote_node_ptdf
-                ptdf_total += ptdf
-            end
+            
+            #for (remote_node, ptdf) in remote_node_ptdf
+            #    ptdf_total += abs(ptdf)
+            #end
             node__new_nodes[n][i] = (n2, ptdf_total)
         end
     end
@@ -274,14 +280,49 @@ function prune_network(
         end
         push!(object_parameter_values, ("node", string(n), "demand", updated_demand))
     end
-    for (n, new_fractional_demand) in new_fractional_demand_dict
-        if I.fractional_demand(node=n) === nothing
-            updated_fractional_demand = new_fractional_demand
+
+# Compute total fractional demand per node
+
+    for n in retained_nodes
+        new_fractional_demand = get(new_fractional_demand_dict, n, 0)
+        if I.fractional_demand(node=n) !== nothing            
+            new_fractional_demand_dict[n] = I.fractional_demand(node=n) + new_fractional_demand
         else
-            updated_fractional_demand = I.fractional_demand(node=n) + new_fractional_demand
-        end
-        push!(object_parameter_values, ("node", string(n), "fractional_demand", updated_fractional_demand))
+            new_fractional_demand_dict[n] = new_fractional_demand
+        end        
     end
+
+# Renormalise fractional demands  
+
+    total_group_fractional_demand = Dict()
+    
+    for (n, new_fractional_demand) in new_fractional_demand_dict
+        for ng in groups(n)
+            if I.demand(node=ng) !== nothing && (I.balance_type(node=ng) == :balance_type_group)
+                if haskey(total_group_fractional_demand, ng)
+                    total_group_fractional_demand[ng] += new_fractional_demand
+                else
+                    total_group_fractional_demand[ng] = new_fractional_demand
+                end
+            end
+        end
+    end
+
+    for (ng, gfd) in total_group_fractional_demand
+        @info "Total Fractional demand for area $ng is $gfd"
+    end
+
+    for (n, new_fractional_demand) in new_fractional_demand_dict
+        for ng in groups(n)
+            if I.demand(node=ng) !== nothing && (I.balance_type(node=ng) == :balance_type_group)
+                new_fractional_demand_dict[n] = new_fractional_demand * (1 / total_group_fractional_demand[ng])
+                @info "adjusted fractional_demand at $(string(n)) from $new_fractional_demand to $(new_fractional_demand_dict[n]) adjustment factor $(1 / total_group_fractional_demand[ng])"
+            end
+        end
+        @info "pushing fractional_demand for $n value $(new_fractional_demand_dict[n])"
+        push!(object_parameter_values, ("node", string(n), "fractional_demand", new_fractional_demand_dict[n]))
+    end   
+
     for (u, new_node) in gens_to_move
         rel = [string(u), string(new_node)]
         push!(relationships, ("unit__to_node", rel))
