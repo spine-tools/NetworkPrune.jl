@@ -312,14 +312,14 @@ function prune_network(
         @info "Total Fractional demand for area $ng is $gfd"
     end
 
+    @info "Renormalising fractional_demands"
+
     for (n, new_fractional_demand) in new_fractional_demand_dict
         for ng in groups(n)
             if I.demand(node=ng) !== nothing && (I.balance_type(node=ng) == :balance_type_group)
-                new_fractional_demand_dict[n] = new_fractional_demand * (1 / total_group_fractional_demand[ng])
-                @info "adjusted fractional_demand at $(string(n)) from $new_fractional_demand to $(new_fractional_demand_dict[n]) adjustment factor $(1 / total_group_fractional_demand[ng])"
+                new_fractional_demand_dict[n] = new_fractional_demand * (1 / total_group_fractional_demand[ng])                
             end
-        end
-        @info "pushing fractional_demand for $n value $(new_fractional_demand_dict[n])"
+        end        
         push!(object_parameter_values, ("node", string(n), "fractional_demand", new_fractional_demand_dict[n]))
     end   
 
