@@ -137,16 +137,19 @@ function prune_network(
                 if I.voltage(node=n) < min_v
                     push!(to_prune_object_keys, (n.class_name, n.name))                    
                     nodes_pruned += 1
+                    @debug "Marked for removal: node $(n.name) with voltage $(I.voltage(node=n)) kV (min required: $min_v kV)"
                     for conn in I.connection__to_node(node=n)
                         if !((conn.class_name, conn.name) in to_prune_object_keys)
                             push!(to_prune_object_keys, (conn.class_name, conn.name))
                             connections_pruned += 1
+                            @debug "Marked for removal: connection $(conn.name) (connected to node $n)"
                         end
                     end
                     for conn in I.connection__from_node(node=n)
                         if !((conn.class_name, conn.name) in to_prune_object_keys)
                             push!(to_prune_object_keys, (conn.class_name, conn.name))
                             connections_pruned += 1
+                            @debug "Marked for removal: connection $(conn.name) (connected from node $n)"
                         end
                     end
                 end
@@ -358,6 +361,7 @@ function prune_network(
     
     all_data = run_request(db_url, "export_data")
     run_request(prunned_db_url, "import_data", (all_data, ""))
+    run_request(prunned_db_url, "call_method", ("commit_session", "Initial import before pruning"))
     object_parameter_values = [(opv..., alternative) for opv in object_parameter_values]
     relationship_parameter_values = [(opv..., alternative) for opv in relationship_parameter_values]
     data_to_import = Dict(
@@ -618,12 +622,24 @@ function _replace_starbusses(prunned_db_url; alternative="Base")
 end
 
 function _prune_and_import(prunned_db_url, to_prune_object_keys, data_to_import, comment)
-    to_prune_object_ids = [
-        x["id"]
-        for x in run_request(prunned_db_url, "query", ("ext_object_sq",))["ext_object_sq"]
-        if (Symbol(x["class_name"]), Symbol(x["name"])) in to_prune_object_keys
-    ]
-    run_request(prunned_db_url, "call_method", ("cascade_remove_items",), Dict(:object => to_prune_object_ids))
+    canonical_class(x) = begin
+        tokens = collect(eachmatch(r"[A-Za-z0-9_]+", string(x)))
+        isempty(tokens) ? lowercase(strip(string(x))) : lowercase(tokens[end].match)
+    end
+    canonical_name(x) = lowercase(strip(string(x)))
+
+    normalized_to_prune = Set((canonical_class(class_name), canonical_name(name)) for (class_name, name) in to_prune_object_keys)
+    ext_objects = run_request(prunned_db_url, "query", ("ext_object_sq",))["ext_object_sq"]
+    to_prune_object_ids = Int[]
+    for x in ext_objects
+        key = (canonical_class(x["class_name"]), canonical_name(x["name"]))
+        if key in normalized_to_prune
+            push!(to_prune_object_ids, x["id"])
+        end
+    end
+    if !isempty(to_prune_object_ids)
+        run_request(prunned_db_url, "call_method", ("cascade_remove_items",), Dict(:object => to_prune_object_ids))
+    end
     added, err_log = import_data(prunned_db_url, ""; data_to_import...)
     @info "Added $(added) items"
     for err in err_log
