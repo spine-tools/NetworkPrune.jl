@@ -21,9 +21,7 @@ module NetworkPrune
 
 using SpineOpt
 using SpineInterface
-using PowerSystems
-using PowerModels
-using PowerSimulations
+import LinearAlgebra: BLAS.gemm, LAPACK.getri!, LAPACK.getrf!
 
 export psse_to_spine
 export prune_network

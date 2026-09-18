@@ -21,7 +21,8 @@ GenTypes=["Wind-on", "Solar", "hydro"]
 
 function prune_network(
     db_url::String, prunned_db_url::String; alternative="Base", node_mapping_file_name="node_mapping.csv"
-)    
+)
+    SpineInterface.open_connection(prunned_db_url)
     I = Module()
     @eval I using SpineInterface
     using_spinedb(db_url, I)
@@ -388,6 +389,7 @@ function prune_network(
     path = joinpath(pwd(), node_mapping_file_name)
     write_node__new_nodes(I, node__new_nodes, path)
     @info "Node mapping written at $path"
+    SpineInterface.close_connection(prunned_db_url)
 end
 
 function traverse(I, n_t, n, traversed, node__new_nodes, min_v, ptdf_conn_n, ptdf)
@@ -750,73 +752,65 @@ end
 Returns a dict indexed on tuples of (connection, node) containing the ptdfs of the system currently in memory.
 """
 function calculate_ptdfs(I, comm)
-    ps_busses = Bus[]
-    ps_lines = Line[]
-    node_ps_bus = Dict{Object,Bus}()
-    i = 1
-    for n in I.node__commodity(commodity=comm)
-        if I.node_opf_type(node=n) == :node_opf_type_reference
-            bustype = BusTypes.REF
-        else
-            bustype = BusTypes.PV
-        end
-        ps_bus = Bus(
-            number = i,
-            name = string(n),
-            bustype = bustype,
-            angle = 0.0,
-            # voltage = 0.0,
-            magnitude = 0.0,
-            voltage_limits = (min = 0.0, max = 0.0),
-            base_voltage = nothing,
-            area = nothing,
-            load_zone = LoadZone(nothing),
-            ext = Dict{String, Any}()
-        )
-        push!(ps_busses,ps_bus)
-        node_ps_bus[n] = ps_bus
-        i = i + 1
-    end
-    # InfrastructureSystems.buscheck(ps_busses)
-    # InfrastructureSystems.slack_bus_check(ps_busses)
+    nodes = I.node__commodity(commodity=comm)
+    connections = []
     for conn in I.connection()
         for n_from in I.connection__from_node(connection=conn)
             for n_to in I.connection__to_node(connection=conn)
                 if n_from != n_to && comm in I.node__commodity(node=n_from) && comm in I.node__commodity(node=n_to)
-                    ps_arc = Arc(node_ps_bus[n_from], node_ps_bus[n_to])
-                    new_line = Line(;
-                        name = string(conn),
-                        available = true,
-                        active_power_flow = 0.0,
-                        reactive_power_flow = 0.0,
-                        arc = ps_arc,
-                        r = I.connection_resistance(connection=conn),
-                        x = max(I.connection_reactance(connection=conn), 0.00001),
-                        b = (from=0.0, to=0.0),
-                        rate = 0.0,
-                        angle_limits = (min = 0.0, max = 0.0)
-                    )
-                    push!(ps_lines,new_line)
+                    push!(connections, (conn, n_from, n_to))
                 end   # in case there are somehow multiple commodities
                 break
             end
         end
     end
-    ps_ptdf = PowerSystems.PTDF(ps_lines, ps_busses)
-    ptdf = Dict{Tuple{Object,Object},Float64}()
-    for n in I.node__commodity(commodity=comm)
-        for conn in I.connection()
-            try
-                ptdf[conn, n] = ps_ptdf[string(conn), node_ps_bus[n].number]
-            catch err
-                err isa KeyError && continue
-                rethrow()
-            end
-        end
+    node_count = length(nodes)
+    conn_count = length(connections)
+    node_numbers = Dict(n => ix for (ix, n) in enumerate(nodes))
+    A = zeros(Float64, node_count, conn_count)  # incidence_matrix
+    inv_X = zeros(Float64, conn_count, conn_count)
+    for (ix, (conn, n_from, n_to)) in enumerate(connections)
+        A[node_numbers[n_from], ix] = 1
+        A[node_numbers[n_to], ix] = -1
+        reactance = max(I.connection_reactance(connection=conn, _default=0), 1e-6)
+        inv_X[ix, ix] = I.connection_reactance_base(connection=conn) / reactance
     end
-    # buildlodf needs to be updated to account for cases
-    # lodfs = PowerSystems.buildlodf(ps_lines,ps_busses)
-    return ptdf
+    i = findfirst(n -> I.node_opf_type(node=n) == :node_opf_type_reference, nodes)
+    if i === nothing
+        error("slack node not found - please set `node_opf_type` to \"node_opf_type_reference\" for one of your nodes")
+    end
+    slack = nodes[i]
+    slack_position = node_numbers[slack]
+    B = gemm(
+        'N',
+        'T',
+        gemm('N', 'N', A[setdiff(1:end, slack_position), 1:end], inv_X),
+        A[setdiff(1:end, slack_position), 1:end],
+    )
+    B, bipiv, binfo = getrf!(B)
+    if binfo < 0
+        error("illegal argument in inputs")
+    elseif binfo > 0
+        error_msg = "singular value in factorization"
+        islands = _islands(nodes)
+        island_count = length(islands)
+        if island_count > 1
+            islands_str = join((string(k, ": ", join(island, ", ")) for (k, island) in enumerate(islands)), "\n\n")
+            error_msg = string(
+                error_msg,
+                " - please make sure your network is fully connected\n\n",
+                "Currently, the network consists of $island_count islands: \n\n$islands_str"
+            )
+        end
+        error(error_msg)
+    end
+    S_ = gemm('N', 'N', gemm('N', 'T', inv_X, A[setdiff(1:end, slack_position), :]), getri!(B, bipiv))
+    ptdf = hcat(S_[:, 1:(slack_position - 1)], zeros(conn_count), S_[:, slack_position:end])
+    Dict(
+        (conn, n) => ptdf[i, j]
+        for (i, (conn, _n_from, _n_to)) in enumerate(connections)
+        for (j, n) in enumerate(nodes)
+    )
 end
 
 """
